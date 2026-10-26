@@ -38,6 +38,12 @@ internal class ScheduleWidgetTextFitter(private val context: Context, width: Flo
         }
     }
 
+    /** Pixel width of the widest laid-out line, rounded up; used to place a field beside another. */
+    fun lineWidth(field: ScheduleWidgetText, scale: Float = 1f): Int {
+        val layout = measure(field, scale).layout ?: return width
+        return (0 until layout.lineCount).maxOfOrNull { ceil(layout.getLineWidth(it)).toInt() } ?: 0
+    }
+
     fun height(fields: List<ScheduleWidgetText>, scale: Float = 1f): Int = fields.filter { it.text.isNotEmpty() }
         .sumOf { measure(it, scale).measuredHeight + dp(it.margin) + 1 }
 

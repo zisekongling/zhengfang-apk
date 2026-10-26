@@ -267,8 +267,8 @@ class ScheduleWidgetTest {
         assertEquals("", repo.snapshot("a", "school", term.next().id).timeBase.firstWeekDate)
     }
 
-    @Test fun fourWidgetStylesKeepIndependentProvidersAndNeverFillTodayWithTomorrow() {
-        assertEquals(4, ScheduleWidgetStyle.entries.map { it.provider }.distinct().size)
+    @Test fun fiveWidgetStylesKeepIndependentProvidersAndNeverFillTodayWithTomorrow() {
+        assertEquals(5, ScheduleWidgetStyle.entries.map { it.provider }.distinct().size)
         val today = course.copy(id = "today", startPeriod = 2, endPeriod = 2)
         val tomorrow = today.copy(id = "tomorrow", day = 2)
         val state = ScheduleWidgetState.from(snapshot().copy(courses = listOf(course, today, tomorrow)), now)
@@ -362,7 +362,7 @@ class ScheduleWidgetTest {
 
     /**
      * 桌面小组件在 Launcher 进程 inflate RemoteViews 布局。这里把宿主 ClassLoader 限制成看不到
-     * com.tyust.course.*（模拟 Launcher 只加载系统类），四个组件布局都必须能正常 inflate。
+     * com.tyust.course.*（模拟 Launcher 只加载系统类），所有组件布局都必须能正常 inflate。
      * 之前倒计时布局用了 App 自定义的 Chronometer 子类，在真实桌面会 InflateException。
      */
     @Test fun widgetLayoutsInflateUnderAnIsolatedLauncherClassLoader() {
@@ -381,7 +381,10 @@ class ScheduleWidgetTest {
             "single" to R.layout.schedule_widget_single,
             "double" to R.layout.schedule_widget,
             "timeline" to R.layout.schedule_widget_timeline,
-            "countdown" to R.layout.schedule_widget_countdown
+            "countdown" to R.layout.schedule_widget_countdown,
+            "grid" to R.layout.schedule_widget_grid,
+            "grid card" to R.layout.schedule_widget_grid_card,
+            "grid preview" to R.layout.schedule_widget_grid_preview
         )
         for ((name, layoutId) in layouts) {
             val root = requireNotNull(inflater.inflate(layoutId, FrameLayout(isolated), false)) as ViewGroup

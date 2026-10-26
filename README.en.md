@@ -74,6 +74,7 @@ See your next class, teacher, and location without opening the app.
 | **Single course · 1×1** | When home screen space is limited | The current or next course, with its full name, teacher, time, and room |
 | **Two courses · 2×1** | To see what comes next | Two courses side by side; tap either for details |
 | **Course timeline · 2×2** | To see the day's sequence | Courses in time order, highlighting the current and next class; resize to show more |
+| **Today's courses · 4×2** | To see the whole day at a glance | Date, teaching week, and course count, with a color-coded card per course showing its name, time, and room in two columns |
 
 Preview and add widgets from **Timetable → More → Widgets**, or use your launcher's widget picker. Long-press to resize a widget for more text, end times, and additional courses. Widgets read the current account's local timetable and work offline. Small widgets prioritize space for full course names, teachers, times, and rooms before adjusting text size; they retain full location information rather than reducing it to a room number.
 

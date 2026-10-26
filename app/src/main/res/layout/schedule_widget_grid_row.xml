@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 网格的一行；渲染代码按列数向其中 addView 课程卡。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_grid_row" android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="horizontal" android:baselineAligned="false"
+    android:divider="@drawable/schedule_widget_grid_gap" android:showDividers="middle" />
