@@ -152,6 +152,7 @@ class ScheduleAgendaComponentDeviceTest {
                     ScheduleWidgetStyle.Double -> 130 to 56
                     ScheduleWidgetStyle.Timeline -> 130 to 130
                     ScheduleWidgetStyle.Countdown -> 130 to 56
+                    ScheduleWidgetStyle.Grid -> 180 to 110
                 }
                 for ((dimensions, scale) in listOf(minimum to 1f, minimum to 1.6f, (280 to 240) to 1f, (150 to 110) to 2f, (360 to 360) to 1.6f)) {
                     compose.runOnIdle {

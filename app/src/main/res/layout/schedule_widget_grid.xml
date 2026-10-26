@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课程网格：头部“日期 · 第N周 / 共N节课”，下方两列课程卡。课程卡由渲染代码按尺寸动态加入。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_surface" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/schedule_widget_outline" android:clipToOutline="true">
+    <ImageView android:id="@+id/widget_background" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="centerCrop" android:contentDescription="@null" />
+<LinearLayout
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp" android:background="@drawable/schedule_widget_light">
+    <LinearLayout android:id="@+id/widget_header" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="8dp">
+        <TextView android:id="@+id/widget_heading" style="@style/ScheduleWidgetMetadata" android:layout_width="0dp"
+            android:layout_weight="1" android:textSize="15sp" android:textStyle="bold" android:textColor="#1D2433"
+            android:text="@string/schedule_widget_grid_preview_heading" />
+        <TextView android:id="@+id/widget_grid_count" style="@style/ScheduleWidgetMetadata" android:layout_width="wrap_content"
+            android:layout_marginStart="8dp" android:textSize="13sp" android:text="@string/schedule_widget_grid_preview_count" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/widget_grid_rows" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:orientation="vertical"
+        android:divider="@drawable/schedule_widget_grid_gap" android:showDividers="middle">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+            android:baselineAligned="false" android:divider="@drawable/schedule_widget_grid_gap" android:showDividers="middle">
+            <include layout="@layout/schedule_widget_grid_card" />
+        </LinearLayout>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/widget_empty" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:gravity="center_vertical" android:orientation="vertical" android:visibility="gone">
+        <TextView android:id="@+id/widget_message" style="@style/ScheduleWidgetCourseName" android:maxLines="2" />
+        <TextView android:id="@+id/widget_action" style="@style/ScheduleWidgetMetadata" android:layout_marginTop="4dp" />
+    </LinearLayout>
+</LinearLayout>
+
+</FrameLayout>

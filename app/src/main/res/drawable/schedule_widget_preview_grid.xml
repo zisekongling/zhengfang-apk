@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy widget-picker preview: some vendor launchers still read previewImage instead of previewLayout. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="160dp"
+    android:viewportWidth="320" android:viewportHeight="160">
+    <path android:fillColor="#F8FAFD" android:pathData="M0,0 L320,0 L320,160 L0,160 Z" />
+    <path android:fillColor="#1C1C1E" android:pathData="M14,14 L120,14 L120,28 L14,28 Z" />
+    <path android:fillColor="#8A8A8E" android:pathData="M262,16 L306,16 L306,26 L262,26 Z" />
+    <path android:fillColor="#EEF3FD" android:pathData="M14,40 L156,40 L156,94 L14,94 Z" />
+    <path android:fillColor="#5C8DF6" android:pathData="M22,50 L25,50 L25,84 L22,84 Z" />
+    <path android:fillColor="#1C1C1E" android:pathData="M32,52 L100,52 L100,64 L32,64 Z" />
+    <path android:fillColor="#8A8A8E" android:pathData="M32,72 L140,72 L140,82 L32,82 Z" />
+    <path android:fillColor="#E9F7F0" android:pathData="M164,40 L306,40 L306,94 L164,94 Z" />
+    <path android:fillColor="#2EB67D" android:pathData="M172,50 L175,50 L175,84 L172,84 Z" />
+    <path android:fillColor="#1C1C1E" android:pathData="M182,52 L250,52 L250,64 L182,64 Z" />
+    <path android:fillColor="#8A8A8E" android:pathData="M182,72 L290,72 L290,82 L182,82 Z" />
+    <path android:fillColor="#E7F6F8" android:pathData="M14,102 L156,102 L156,146 L14,146 Z" />
+    <path android:fillColor="#22A7B5" android:pathData="M22,110 L25,110 L25,138 L22,138 Z" />
+    <path android:fillColor="#1C1C1E" android:pathData="M32,111 L130,111 L130,123 L32,123 Z" />
+    <path android:fillColor="#8A8A8E" android:pathData="M32,128 L140,128 L140,138 L32,138 Z" />
+    <path android:fillColor="#FDEEEE" android:pathData="M164,102 L306,102 L306,146 L164,146 Z" />
+    <path android:fillColor="#E5605A" android:pathData="M172,110 L175,110 L175,138 L172,138 Z" />
+    <path android:fillColor="#1C1C1E" android:pathData="M182,111 L270,111 L270,123 L182,123 Z" />
+    <path android:fillColor="#8A8A8E" android:pathData="M182,128 L296,128 L296,138 L182,138 Z" />
+</vector>

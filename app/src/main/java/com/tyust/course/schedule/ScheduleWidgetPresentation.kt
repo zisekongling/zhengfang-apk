@@ -144,8 +144,16 @@ internal object ScheduleWidgetRenderer {
                 views(context, state, it.width.toInt(), it.height.toInt(), style, appearance)
             })
         }
-        val minW = options.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, if (style == ScheduleWidgetStyle.Single) 56 else 130).coerceAtLeast(1)
-        val minH = options.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (style == ScheduleWidgetStyle.Timeline) 130 else 56).coerceAtLeast(1)
+        val minW = options.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, when (style) {
+            ScheduleWidgetStyle.Single -> 56
+            ScheduleWidgetStyle.Grid -> 250
+            else -> 130
+        }).coerceAtLeast(1)
+        val minH = options.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, when (style) {
+            ScheduleWidgetStyle.Timeline -> 130
+            ScheduleWidgetStyle.Grid -> 110
+            else -> 56
+        }).coerceAtLeast(1)
         val maxW = options.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, minW).coerceAtLeast(minW)
         val maxH = options.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, minH).coerceAtLeast(minH)
         return RemoteViews(views(context, state, maxW, minH, style, appearance), views(context, state, minW, maxH, style, appearance))
@@ -163,6 +171,8 @@ internal object ScheduleWidgetRenderer {
             return timeline(context, state, width, height, scale, dark, primaryColor, secondaryColor, accentColor, appearance).also { applyAppearance(context, it, appearance, dark) }
         if (style == ScheduleWidgetStyle.Countdown)
             return countdown(context, state, width, height, scale, dark, primaryColor, secondaryColor, accentColor, appearance).also { applyAppearance(context, it, appearance, dark) }
+        if (style == ScheduleWidgetStyle.Grid)
+            return grid(context, state, width, height, scale, dark, primaryColor, secondaryColor, accentColor, appearance).also { applyAppearance(context, it, appearance, dark) }
         val views = RemoteViews(context.packageName, if (style == ScheduleWidgetStyle.Single) R.layout.schedule_widget_single else R.layout.schedule_widget)
         val shown = display(state, appearance)
         val two = style == ScheduleWidgetStyle.Double
@@ -538,6 +548,183 @@ internal object ScheduleWidgetRenderer {
             total > rows.size -> "今日 $total 堂 · 点按查看全部"
             else -> state.summary.ifBlank { "点按查看课表" }
         })
+        return views
+    }
+
+    /** 网格课程卡：课程色淡底。浅色叠在白色上，深色叠在深灰卡片色上，保证文字对比度。 */
+    private fun gridTint(color: Int, dark: Boolean): Int {
+        val base = if (dark) 0xFF262E3A.toInt() else 0xFFFFFFFF.toInt()
+        val ratio = if (dark) 0.24f else 0.11f
+        fun channel(shift: Int) = (((color shr shift) and 0xFF) * ratio + ((base shr shift) and 0xFF) * (1 - ratio)).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+    }
+
+    /**
+     * 今日课程网格：头部“M.d 周X · 第N周 / 共N节课”，下方课程卡按时间先填左列、再填右列。
+     * 与时间轴一样先减少卡片数量保住常规字号；放不下时依次省掉课程数、周次、头部，最后才缩小文字。
+     * 课名、时间与地点始终完整显示，不会被省略号截断。
+     */
+    private fun grid(context: Context, state: ScheduleWidgetState, width: Int, height: Int, scale: Float,
+                     dark: Boolean, primary: Int, secondary: Int, accent: Int,
+                     appearance: ScheduleWidgetAppearance): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.schedule_widget_grid)
+        val density = context.resources.displayMetrics.density
+        val shown = display(state, appearance)
+        val tomorrowMode = shown.tomorrowMode
+        val padding = if (height < 120 || width < 200) 8 else 12
+        val paddingPx = (padding * density).toInt()
+        views.setViewPadding(R.id.widget_root, paddingPx, paddingPx, paddingPx, paddingPx)
+        views.setInt(R.id.widget_root, "setBackgroundResource", if (dark) R.drawable.schedule_widget_dark else R.drawable.schedule_widget_light)
+        views.removeAllViews(R.id.widget_grid_rows)
+
+        // 头部：日期 · 周次（周次未知时省略），右侧为当天课程总数。
+        val day = if (tomorrowMode) Calendar.getInstance().apply { timeInMillis = state.now; add(Calendar.DATE, 1) }.timeInMillis else state.now
+        val week = if (tomorrowMode) ScheduleDates.weekAt(state.snapshot?.timeBase?.firstWeekDate, day) else state.agenda?.week
+        val dateText = (if (tomorrowMode) "明日 " else "") + SimpleDateFormat("M.d E", Locale.CHINA).format(Date(day))
+        val headingText = dateText + (week?.let { " · 第${it}周" } ?: "")
+        val all = if (tomorrowMode) state.tomorrow.map { it.occurrence } else state.agenda?.today.orEmpty()
+        val countText = if (all.isEmpty()) "" else "共${all.size}节课"
+        val headerFitter = ScheduleWidgetTextFitter(context, (width - padding * 2).coerceAtLeast(1) * density)
+        fun headerFits(text: String) = headerFitter.fits(listOf(ScheduleWidgetText(text, 15f, bold = true, singleLine = true)), Int.MAX_VALUE)
+        // 课程数按 15sp 粗体估算，宽度只会偏大，保证头部一行放下。
+        val header = listOf(headingText to countText, headingText to "", dateText to "")
+            .distinct().firstOrNull { (heading, count) -> headerFits(if (count.isEmpty()) heading else "$heading\u3000\u3000$count") }
+        var showHeader = header != null
+        val headerHeight = header?.let { headerFitter.height(listOf(ScheduleWidgetText(it.first, 15f, bold = true))) + headerFitter.dp(8f) } ?: 0
+
+        val gap = 8
+        val maxColumns = if (width >= 220 * scale) 2 else 1
+        val showTeacher = height >= 220 * scale && maxColumns == 2 && width >= 320 * scale
+        fun timeRange(item: ScheduleOccurrence, full: Boolean) = SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(item.startsAt)) +
+            if (full) " - " + SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(item.endsAt)) else ""
+
+        /** 一张卡：inline 时“时间  地点”同一行；放不下时时间单独一行、地点另起一行完整换行。 */
+        class Card(val item: ScheduleOccurrence, val time: String, val inline: Boolean, val fields: List<ScheduleWidgetText>)
+        class Plan(val fitter: ScheduleWidgetTextFitter, val rows: List<List<Card?>>, val heights: List<Int>) {
+            val total get() = heights.sum() + fitter.dp(gap.toFloat()) * (rows.size - 1).coerceAtLeast(0)
+        }
+        fun plan(items: List<ScheduleOccurrence>): Plan {
+            val columns = maxColumns.coerceAtMost(items.size).coerceAtLeast(1)
+            val cardWidth = (width - padding * 2 - gap * (columns - 1)).toFloat() / columns
+            // 卡片左右内边距 10dp ×2、色条 3dp、色条与文字间距 8dp。
+            val fitter = ScheduleWidgetTextFitter(context, (cardWidth - 31).coerceAtLeast(1f) * density)
+            fun card(item: ScheduleOccurrence): Card {
+                val room = item.course.location.ifBlank { "教室待定" }
+                val name = ScheduleWidgetText(item.course.name, 15f, bold = true)
+                val teacher = if (showTeacher) ScheduleWidgetText(item.course.teacher.ifBlank { "教师待定" }, 12f, margin = 2f) else null
+                val full = timeRange(item, true)
+                // 实际布局里地点只隔 6dp，这里按三个空格测量，宽度只会偏大。
+                val inline = ScheduleWidgetText("$full   $room", 12f, margin = 3f, singleLine = true)
+                if (fitter.fits(listOf(inline), Int.MAX_VALUE)) return Card(item, full, true, listOfNotNull(name, teacher, inline))
+                val time = if (fitter.fits(listOf(ScheduleWidgetText(full, 12f, singleLine = true)), Int.MAX_VALUE)) full else timeRange(item, false)
+                return Card(item, time, false, listOfNotNull(name, teacher,
+                    ScheduleWidgetText(time, 12f, margin = 3f, singleLine = true), ScheduleWidgetText(room, 12f, margin = 3f)))
+            }
+            val cards = items.map(::card)
+            val rowCount = (cards.size + columns - 1) / columns
+            // 先左列、后右列：上午的课在左，下午的课在右，和课表的阅读顺序一致。
+            val rows = (0 until rowCount).map { row -> (0 until columns).map { column -> cards.getOrNull(column * rowCount + row) } }
+            val heights = rows.map { row -> row.filterNotNull().maxOf { fitter.height(it.fields) + fitter.dp(16f) } }
+            return Plan(fitter, rows, heights)
+        }
+        fun candidates(limit: Int) = if (tomorrowMode) all.take(limit) else timelineItems(state, limit)
+        fun available() = headerFitter.dp((height - padding * 2).toFloat()) - 2 - (if (showHeader) headerHeight else 0)
+        fun fitting(): Plan? {
+            for (limit in maxColumns * 4 downTo 1) {
+                val items = candidates(limit)
+                if (items.isEmpty()) return null
+                if (items.size < limit) continue
+                val plan = plan(items)
+                if (plan.total <= available() && plan.rows.flatten().filterNotNull().all { plan.fitter.fits(it.fields, Int.MAX_VALUE) }) return plan
+            }
+            return null
+        }
+        var fitted = fitting()
+        if (fitted == null && showHeader) { showHeader = false; fitted = fitting() }
+        // 极小尺寸：只留一张卡，按真实测量缩小字号，仍完整显示课名、时间与地点。
+        val result = fitted ?: candidates(1).takeIf { it.isNotEmpty() }?.let(::plan)
+        val rows = result?.rows.orEmpty()
+
+        views.visible(R.id.widget_header, showHeader)
+        views.setTextViewText(R.id.widget_heading, header?.first.orEmpty())
+        views.setTextViewText(R.id.widget_grid_count, header?.second.orEmpty())
+        views.visible(R.id.widget_grid_count, !header?.second.isNullOrEmpty())
+        views.setTextColor(R.id.widget_heading, primary)
+        views.setTextColor(R.id.widget_grid_count, secondary)
+        views.setContentDescription(R.id.widget_header, listOfNotNull(header?.first, header?.second?.takeIf { it.isNotEmpty() }).joinToString("，"))
+        views.setOnClickPendingIntent(R.id.widget_root, pending(context, state, action = if (rows.isEmpty() && !tomorrowMode) state.action else ScheduleWidgetAction.Today))
+        views.setOnClickPendingIntent(R.id.widget_header, pending(context, state))
+
+        if (result != null) {
+            val extra = (available() - result.total).coerceAtLeast(0)
+            // 多出的高度平均分给每行，但不把卡片撑得过高；剩余空间留在底部。
+            val bonus = if (fitted != null) (extra / rows.size).coerceAtMost(result.fitter.dp(20f)) else 0
+            rows.forEachIndexed { index, row ->
+                val rowViews = RemoteViews(context.packageName, R.layout.schedule_widget_grid_row)
+                val rowPixels = if (fitted != null) result.heights[index] + bonus else available()
+                for (card in row) {
+                    val cardViews = RemoteViews(context.packageName, R.layout.schedule_widget_grid_card)
+                    cardViews.setInt(R.id.widget_course, "setMinimumHeight", rowPixels.coerceAtLeast(0))
+                    if (card == null) {
+                        // 奇数门课时右列最后一格留空，保持左右两列同宽。
+                        cardViews.setViewVisibility(R.id.widget_course, View.INVISIBLE)
+                        rowViews.addView(R.id.widget_grid_row, cardViews)
+                        continue
+                    }
+                    val item = card.item
+                    val color = courseColor(item.course.id)
+                    val past = !tomorrowMode && item.endsAt <= state.now
+                    cardViews.setInt(R.id.widget_grid_card, "setColorFilter", gridTint(color, dark))
+                    cardViews.setInt(R.id.widget_grid_card, "setImageAlpha", if (dark) 225 else 235)
+                    cardViews.setInt(R.id.widget_grid_bar, "setColorFilter", color)
+                    cardViews.setInt(R.id.widget_grid_bar, "setImageAlpha", if (past) 110 else 255)
+                    val typeFit = if (fitted != null) 1f else result.fitter.scale(card.fields, rowPixels - result.fitter.dp(16f))
+                    fun text(id: Int, value: String, size: Float, textColor: Int) {
+                        cardViews.setTextViewText(id, value)
+                        cardViews.setTextViewTextSize(id, android.util.TypedValue.COMPLEX_UNIT_SP, size * typeFit)
+                        cardViews.setTextColor(id, textColor)
+                    }
+                    val room = item.course.location.ifBlank { "教室待定" }
+                    text(R.id.widget_name, item.course.name, 15f, if (past) secondary else primary)
+                    text(R.id.widget_teacher, item.course.teacher.ifBlank { "教师待定" }, 12f, secondary)
+                    cardViews.visible(R.id.widget_teacher, showTeacher)
+                    text(R.id.widget_location, room, 12f, secondary)
+                    if (card.inline) {
+                        text(R.id.widget_grid_time, card.time, 12f, secondary)
+                        cardViews.visible(R.id.widget_grid_time, true)
+                        cardViews.visible(R.id.widget_time, false)
+                        cardViews.setViewPadding(R.id.widget_location, (6 * density).toInt(), 0, 0, 0)
+                    } else {
+                        text(R.id.widget_time, card.time, 12f, secondary)
+                        cardViews.visible(R.id.widget_time, true)
+                        cardViews.visible(R.id.widget_grid_time, false)
+                        cardViews.setViewPadding(R.id.widget_location, 0, 0, 0, 0)
+                    }
+                    val status = when {
+                        tomorrowMode -> "明天"
+                        state.now in item.startsAt until item.endsAt -> "进行中"
+                        past -> "已结束"
+                        else -> "待上课"
+                    }
+                    cardViews.setContentDescription(R.id.widget_course,
+                        "${item.course.name}，${timeRange(item, true)}，$room，${item.course.teacher.ifBlank { "教师待定" }}，$status")
+                    cardViews.setOnClickPendingIntent(R.id.widget_course, pending(context, state, item))
+                    rowViews.addView(R.id.widget_grid_row, cardViews)
+                }
+                views.addView(R.id.widget_grid_rows, rowViews)
+            }
+        }
+        views.visible(R.id.widget_grid_rows, rows.isNotEmpty())
+        views.visible(R.id.widget_empty, rows.isEmpty())
+        val emptyMessage = if (tomorrowMode) "今日课程结束 · 明日无课" else state.message ?: "今天没有课程"
+        views.setTextViewText(R.id.widget_message, emptyMessage)
+        views.setTextViewText(R.id.widget_action, state.actionLabel)
+        views.visible(R.id.widget_action, height >= 82 * scale)
+        views.setTextColor(R.id.widget_message, primary)
+        views.setTextColor(R.id.widget_action, accent)
+        views.setOnClickPendingIntent(R.id.widget_empty, pending(context, state, action = state.action))
+        views.setOnClickPendingIntent(R.id.widget_action, pending(context, state, action = state.action))
+        views.setContentDescription(R.id.widget_empty, "$emptyMessage，${state.actionLabel}")
         return views
     }
 

@@ -67,7 +67,11 @@ class ScheduleWidgetAppearanceActivity : ComponentActivity() {
             }
             val state = remember { widgetAppearancePreview() }
             val width = if (style == ScheduleWidgetStyle.Single) 160 else 300
-            val height = if (style == ScheduleWidgetStyle.Double) 150 else if (style == ScheduleWidgetStyle.Single) 160 else 280
+            val height = when (style) {
+                ScheduleWidgetStyle.Double, ScheduleWidgetStyle.Grid -> 150
+                ScheduleWidgetStyle.Single -> 160
+                else -> 280
+            }
             var views by remember { mutableStateOf<android.widget.RemoteViews?>(null) }
             val dark = androidx.compose.foundation.isSystemInDarkTheme()
             LaunchedEffect(appearance, dark) {
