@@ -184,7 +184,9 @@ class ScheduleAgendaComponentDeviceTest {
                         }
                         check(requireNotNull(rendered))
                         assertEquals(first.name, rendered!!.findViewById<TextView>(R.id.widget_name).text.toString())
-                        assertEquals(View.VISIBLE, rendered!!.findViewById<View>(R.id.widget_teacher).visibility)
+                        // 今日课程网格只在 320×220dp 以上才补充教师，这里的尺寸都不显示。
+                        if (kind != ScheduleWidgetStyle.Grid)
+                            assertEquals(View.VISIBLE, rendered!!.findViewById<View>(R.id.widget_teacher).visibility)
                         assertTrue(rendered!!.findViewById<View>(R.id.widget_course).isClickable)
                     }
                     capture("style-${kind.name}-${if (night) "dark" else "light"}-${dimensions.first}-${dimensions.second}-font$scale")
