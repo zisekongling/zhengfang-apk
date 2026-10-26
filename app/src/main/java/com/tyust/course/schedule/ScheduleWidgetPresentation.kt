@@ -571,9 +571,15 @@ internal object ScheduleWidgetRenderer {
         val density = context.resources.displayMetrics.density
         val shown = display(state, appearance)
         val tomorrowMode = shown.tomorrowMode
-        val padding = if (height < 120 || width < 200) 8 else 12
-        val paddingPx = (padding * density).toInt()
-        views.setViewPadding(R.id.widget_root, paddingPx, paddingPx, paddingPx, paddingPx)
+        // 常见 4×2 只有 140–170dp 高：矮尺寸收紧上下留白，让头部加两行卡片完整放下。
+        val compactHeight = height < 170 * scale
+        val padding = if (width < 200) 8 else 12
+        val verticalPadding = if (compactHeight) 8 else 12
+        val headerGap = if (compactHeight) 4 else 6
+        val cardPadding = if (compactHeight) 5 else 8
+        fun px(dp: Int) = (dp * density).toInt()
+        views.setViewPadding(R.id.widget_root, px(padding), px(verticalPadding), px(padding), px(verticalPadding))
+        views.setViewPadding(R.id.widget_header, 0, 0, 0, px(headerGap))
         views.setInt(R.id.widget_root, "setBackgroundResource", if (dark) R.drawable.schedule_widget_dark else R.drawable.schedule_widget_light)
         views.removeAllViews(R.id.widget_grid_rows)
 
@@ -585,14 +591,15 @@ internal object ScheduleWidgetRenderer {
         val all = if (tomorrowMode) state.tomorrow.map { it.occurrence } else state.agenda?.today.orEmpty()
         val countText = if (all.isEmpty()) "" else "共${all.size}节课"
         val headerFitter = ScheduleWidgetTextFitter(context, (width - padding * 2).coerceAtLeast(1) * density)
-        fun headerFits(text: String) = headerFitter.fits(listOf(ScheduleWidgetText(text, 15f, bold = true, singleLine = true)), Int.MAX_VALUE)
-        // 课程数按 15sp 粗体估算，宽度只会偏大，保证头部一行放下。
+        fun headerFits(text: String) = headerFitter.fits(listOf(ScheduleWidgetText(text, 14f, bold = true, singleLine = true)), Int.MAX_VALUE)
+        // 课程数（实际 12sp 常规）按 14sp 粗体估算，宽度只会偏大，保证头部一行放下。
         val header = listOf(headingText to countText, headingText to "", dateText to "")
             .distinct().firstOrNull { (heading, count) -> headerFits(if (count.isEmpty()) heading else "$heading\u3000\u3000$count") }
         var showHeader = header != null
-        val headerHeight = header?.let { headerFitter.height(listOf(ScheduleWidgetText(it.first, 15f, bold = true))) + headerFitter.dp(8f) } ?: 0
+        val headerHeight = header?.let { headerFitter.height(listOf(ScheduleWidgetText(it.first, 14f, bold = true))) + headerFitter.dp(headerGap.toFloat()) } ?: 0
 
-        val gap = 8
+        // 与 schedule_widget_grid_gap 的 6dp 分隔一致。
+        val gap = 6
         val maxColumns = if (width >= 220 * scale) 2 else 1
         val showTeacher = height >= 220 * scale && maxColumns == 2 && width >= 320 * scale
         fun timeRange(item: ScheduleOccurrence, full: Boolean) = SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(item.startsAt)) +
@@ -606,29 +613,32 @@ internal object ScheduleWidgetRenderer {
         fun plan(items: List<ScheduleOccurrence>): Plan {
             val columns = maxColumns.coerceAtMost(items.size).coerceAtLeast(1)
             val cardWidth = (width - padding * 2 - gap * (columns - 1)).toFloat() / columns
-            // 卡片左右内边距 10dp ×2、色条 3dp、色条与文字间距 8dp。
-            val fitter = ScheduleWidgetTextFitter(context, (cardWidth - 31).coerceAtLeast(1f) * density)
+            // 卡片左右内边距 8dp ×2、色条 3dp、色条与文字间距 7dp。
+            val fitter = ScheduleWidgetTextFitter(context, (cardWidth - 26).coerceAtLeast(1f) * density)
             fun card(item: ScheduleOccurrence): Card {
                 val room = item.course.location.ifBlank { "教室待定" }
-                val name = ScheduleWidgetText(item.course.name, 15f, bold = true)
+                val name = ScheduleWidgetText(item.course.name, 14f, bold = true)
                 val teacher = if (showTeacher) ScheduleWidgetText(item.course.teacher.ifBlank { "教师待定" }, 12f, margin = 2f) else null
                 val full = timeRange(item, true)
-                // 实际布局里地点只隔 6dp，这里按三个空格测量，宽度只会偏大。
-                val inline = ScheduleWidgetText("$full   $room", 12f, margin = 3f, singleLine = true)
-                if (fitter.fits(listOf(inline), Int.MAX_VALUE)) return Card(item, full, true, listOfNotNull(name, teacher, inline))
-                val time = if (fitter.fits(listOf(ScheduleWidgetText(full, 12f, singleLine = true)), Int.MAX_VALUE)) full else timeRange(item, false)
+                // 先试“08:00 - 09:40”，窄一点时去掉连字符两侧空格；实际布局里地点隔 5dp，按两个空格（约 6dp）测量，宽度只会偏大。
+                for (time in listOf(full, full.replace(" - ", "-"))) {
+                    val inline = ScheduleWidgetText("$time  $room", 12f, margin = 2f, singleLine = true)
+                    if (fitter.fits(listOf(inline), Int.MAX_VALUE)) return Card(item, time, true, listOfNotNull(name, teacher, inline))
+                }
+                val time = listOf(full, full.replace(" - ", "-"))
+                    .firstOrNull { fitter.fits(listOf(ScheduleWidgetText(it, 12f, singleLine = true)), Int.MAX_VALUE) } ?: timeRange(item, false)
                 return Card(item, time, false, listOfNotNull(name, teacher,
-                    ScheduleWidgetText(time, 12f, margin = 3f, singleLine = true), ScheduleWidgetText(room, 12f, margin = 3f)))
+                    ScheduleWidgetText(time, 12f, margin = 2f, singleLine = true), ScheduleWidgetText(room, 12f, margin = 2f)))
             }
             val cards = items.map(::card)
             val rowCount = (cards.size + columns - 1) / columns
             // 先左列、后右列：上午的课在左，下午的课在右，和课表的阅读顺序一致。
             val rows = (0 until rowCount).map { row -> (0 until columns).map { column -> cards.getOrNull(column * rowCount + row) } }
-            val heights = rows.map { row -> row.filterNotNull().maxOf { fitter.height(it.fields) + fitter.dp(16f) } }
+            val heights = rows.map { row -> row.filterNotNull().maxOf { fitter.height(it.fields) + fitter.dp(cardPadding * 2f) } }
             return Plan(fitter, rows, heights)
         }
         fun candidates(limit: Int) = if (tomorrowMode) all.take(limit) else timelineItems(state, limit)
-        fun available() = headerFitter.dp((height - padding * 2).toFloat()) - 2 - (if (showHeader) headerHeight else 0)
+        fun available() = headerFitter.dp((height - verticalPadding * 2).toFloat()) - 2 - (if (showHeader) headerHeight else 0)
         fun fitting(): Plan? {
             for (limit in maxColumns * 4 downTo 1) {
                 val items = candidates(limit)
@@ -665,6 +675,7 @@ internal object ScheduleWidgetRenderer {
                 for (card in row) {
                     val cardViews = RemoteViews(context.packageName, R.layout.schedule_widget_grid_card)
                     cardViews.setInt(R.id.widget_course, "setMinimumHeight", rowPixels.coerceAtLeast(0))
+                    cardViews.setViewPadding(R.id.widget_grid_content, px(8), px(cardPadding), px(8), px(cardPadding))
                     if (card == null) {
                         // 奇数门课时右列最后一格留空，保持左右两列同宽。
                         cardViews.setViewVisibility(R.id.widget_course, View.INVISIBLE)
@@ -678,14 +689,14 @@ internal object ScheduleWidgetRenderer {
                     cardViews.setInt(R.id.widget_grid_card, "setImageAlpha", if (dark) 225 else 235)
                     cardViews.setInt(R.id.widget_grid_bar, "setColorFilter", color)
                     cardViews.setInt(R.id.widget_grid_bar, "setImageAlpha", if (past) 110 else 255)
-                    val typeFit = if (fitted != null) 1f else result.fitter.scale(card.fields, rowPixels - result.fitter.dp(16f))
+                    val typeFit = if (fitted != null) 1f else result.fitter.scale(card.fields, rowPixels - result.fitter.dp(cardPadding * 2f))
                     fun text(id: Int, value: String, size: Float, textColor: Int) {
                         cardViews.setTextViewText(id, value)
                         cardViews.setTextViewTextSize(id, android.util.TypedValue.COMPLEX_UNIT_SP, size * typeFit)
                         cardViews.setTextColor(id, textColor)
                     }
                     val room = item.course.location.ifBlank { "教室待定" }
-                    text(R.id.widget_name, item.course.name, 15f, if (past) secondary else primary)
+                    text(R.id.widget_name, item.course.name, 14f, if (past) secondary else primary)
                     text(R.id.widget_teacher, item.course.teacher.ifBlank { "教师待定" }, 12f, secondary)
                     cardViews.visible(R.id.widget_teacher, showTeacher)
                     text(R.id.widget_location, room, 12f, secondary)
@@ -693,7 +704,7 @@ internal object ScheduleWidgetRenderer {
                         text(R.id.widget_grid_time, card.time, 12f, secondary)
                         cardViews.visible(R.id.widget_grid_time, true)
                         cardViews.visible(R.id.widget_time, false)
-                        cardViews.setViewPadding(R.id.widget_location, (6 * density).toInt(), 0, 0, 0)
+                        cardViews.setViewPadding(R.id.widget_location, px(5), 0, 0, 0)
                     } else {
                         text(R.id.widget_time, card.time, 12f, secondary)
                         cardViews.visible(R.id.widget_time, true)

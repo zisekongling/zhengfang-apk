@@ -8,24 +8,24 @@
         android:contentDescription="@null" android:importantForAccessibility="no" />
     <LinearLayout android:id="@+id/widget_grid_content" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_gravity="center_vertical" android:orientation="horizontal"
-        android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingTop="8dp" android:paddingBottom="8dp">
+        android:paddingStart="8dp" android:paddingEnd="8dp" android:paddingTop="7dp" android:paddingBottom="7dp">
         <ImageView android:id="@+id/widget_grid_bar" android:layout_width="3dp" android:layout_height="match_parent"
             android:src="@drawable/schedule_widget_grid_bar" android:scaleType="fitXY"
             android:contentDescription="@null" android:importantForAccessibility="no" />
         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:layout_marginStart="8dp" android:orientation="vertical">
-            <TextView android:id="@+id/widget_name" style="@style/ScheduleWidgetCourseName" android:textSize="15sp"
+            android:layout_marginStart="7dp" android:orientation="vertical">
+            <TextView android:id="@+id/widget_name" style="@style/ScheduleWidgetCourseName"
                 android:text="@string/schedule_widget_preview" />
             <TextView android:id="@+id/widget_teacher" style="@style/ScheduleWidgetFullText" android:layout_marginTop="2dp"
                 android:visibility="gone" />
-            <TextView android:id="@+id/widget_time" style="@style/ScheduleWidgetMetadata" android:layout_marginTop="3dp"
+            <TextView android:id="@+id/widget_time" style="@style/ScheduleWidgetMetadata" android:layout_marginTop="2dp"
                 android:visibility="gone" />
             <LinearLayout android:id="@+id/widget_grid_meta" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="3dp" android:orientation="horizontal">
+                android:layout_marginTop="2dp" android:orientation="horizontal">
                 <TextView android:id="@+id/widget_grid_time" style="@style/ScheduleWidgetMetadata" android:layout_width="wrap_content"
                     android:text="@string/schedule_widget_preview_time" />
                 <TextView android:id="@+id/widget_location" style="@style/ScheduleWidgetFullText" android:layout_width="0dp"
-                    android:layout_weight="1" android:paddingStart="6dp" android:text="@string/schedule_widget_preview_room" />
+                    android:layout_weight="1" android:paddingStart="5dp" android:text="@string/schedule_widget_preview_room" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
