@@ -100,7 +100,7 @@ jobs:
         run: |
           chmod +x gradlew
           test -n "$MAP_CONFIG_CLIENT_SECRET" || { echo "Missing map configuration release credential"; exit 1; }
-          ./gradlew :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleRelease --no-parallel --max-workers=2 --console=plain
+          ./gradlew :browser-protocol:testDebugUnitTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug :app:assembleRelease --no-parallel --max-workers=2 --console=plain
           python3 scripts/check_onnx_jni.py app/build/outputs/mapping/release/mapping.txt
       - name: Bind artifact to source and check reports
         if: inputs.reuse_run_id == ''

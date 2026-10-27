@@ -38,7 +38,7 @@ jobs:
       - name: Run unit tests and assemble the debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-parallel --max-workers=2 --console=plain
+          ./gradlew :browser-protocol:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :browser:assembleDebug --no-parallel --max-workers=2 --console=plain
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,5 +53,5 @@ jobs:
         env:
           RESULT: ${{ job.status }}
         run: |
-          echo "JVM unit tests + debug APK: $RESULT (\`./gradlew :app:testDebugUnitTest :app:assembleDebug\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "JVM unit tests + debug APK: $RESULT (\`./gradlew :browser-protocol:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :browser:assembleDebug\`)" >> "$GITHUB_STEP_SUMMARY"
           echo 'Reports are attached as the `unit-test-reports` artifact.' >> "$GITHUB_STEP_SUMMARY"

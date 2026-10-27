@@ -223,7 +223,7 @@ class PluginEmbeddedBrowserDeviceTest {
         } finally {
             File(context.getExternalFilesDir(null),"chapter-script-diagnostic.json").writeText(JSONArray(trace.toList()).toString(2))
             session.retire()
-            File(context.noBackupFilesDir,"embedded-browser/$profile").deleteRecursively()
+            forget(profile)
         }
     }
 
@@ -279,7 +279,7 @@ class PluginEmbeddedBrowserDeviceTest {
             }
         } finally {
             vault.clear()
-            File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively()
+            forget(profile)
         }
     }
 
@@ -299,7 +299,7 @@ class PluginEmbeddedBrowserDeviceTest {
                         JSONObject().put("url", "https://example.com/")).getString("header"))
                 }
             }
-        } finally { File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively() }
+        } finally { forget(profile) }
     }
 
     /** Only the public example.com document is downloaded. GM requests use synthetic Binder replies. */
@@ -365,7 +365,7 @@ class PluginEmbeddedBrowserDeviceTest {
                     client.call("script.stop")
                 }
             }
-        } finally { File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively() }
+        } finally { forget(profile) }
     }
 
     @Test fun nativeControlsReachUserscriptDomListenersAfterSettingsAreWritten() {
@@ -419,7 +419,7 @@ class PluginEmbeddedBrowserDeviceTest {
                 assertTrue("Native click did not reach the userScript DOM listener", clicked.await(5, TimeUnit.SECONDS))
                 client.call("script.stop")
             }
-        } finally { File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively() }
+        } finally { forget(profile) }
     }
 
     @Test fun nativeDialogActionsAndBrowserInputsWorkWithoutOpeningABrowserActivity() {
@@ -479,7 +479,7 @@ class PluginEmbeddedBrowserDeviceTest {
                 assertTrue("Responses did not reach the original script", complete.await(10, TimeUnit.SECONDS))
                 client.call("script.stop")
             }
-        } finally { File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively() }
+        } finally { forget(profile) }
     }
 
     @Test fun nativeStartWaitsForDelayedEntryAndTaskListeners() {
@@ -534,7 +534,7 @@ class PluginEmbeddedBrowserDeviceTest {
                 assertTrue("Task was clicked before its listener was attached", started.await(5, TimeUnit.SECONDS))
                 client.call("script.stop")
             }
-        } finally { File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively() }
+        } finally { forget(profile) }
     }
 
     @Test fun backgroundTimersAndRequestsContinueAfterTheBrowserIsMinimized() {
@@ -586,7 +586,7 @@ class PluginEmbeddedBrowserDeviceTest {
                     .put("values", JSONObject()).put("runAt", "document-end"))
                 val page = client.call("page.open", JSONObject().put("url", "https://example.com/")
                     .put("origins", JSONArray().put("https://example.com")).put("scriptHandle", handle).put("active", true))
-                context.startActivity(Intent(context, PluginEmbeddedBrowserActivity::class.java)
+                context.startActivity(PluginEmbeddedBrowser.activity("")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("handle", page.getString("handle")))
                 assertNotNull("Browser activity did not appear", device.wait(Until.findObject(By.text("收起")), 10_000))
                 PluginForegroundWork.add(context, handle, PluginForegroundWork.Entry("synthetic.background", "后台运行测试") {})
@@ -601,7 +601,7 @@ class PluginEmbeddedBrowserDeviceTest {
                 assertEquals("Background requests failed", 0, failures.get())
                 assertEquals(page.getString("handle"), client.call("page.status", JSONObject()
                     .put("handle", page.getString("handle"))).getString("handle"))
-                context.startActivity(Intent(context, PluginEmbeddedBrowserActivity::class.java)
+                context.startActivity(PluginEmbeddedBrowser.activity("")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("handle", page.getString("handle")))
                 assertNotNull("Browser activity did not reopen", device.wait(Until.findObject(By.text("收起")), 10_000))
                 val resumedReplies = CountDownLatch(3)
@@ -618,8 +618,14 @@ class PluginEmbeddedBrowserDeviceTest {
             }
         } finally {
             PluginForegroundWork.remove(context, handle)
-            File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively()
+            forget(profile)
         }
+    }
+
+    /** Profiles live in the browser APK's storage now; ask it to delete one. */
+    private fun forget(profile: String) {
+        if (!BrowserComponentHost.status(context).ready) return
+        Client(profile).use { it.call("retire", JSONObject().put("profiles", JSONArray().put(profile))) }
     }
 
     private inner class Client(
@@ -651,7 +657,8 @@ class PluginEmbeddedBrowserDeviceTest {
             override fun onServiceDisconnected(name: ComponentName) { died.countDown() }
         }
         init {
-            assertTrue(context.bindService(Intent(context, PluginEmbeddedBrowserService::class.java),
+            assumeTrue("Install the :browser APK for this App variant first", BrowserComponentHost.status(context).ready)
+            assertTrue(context.bindService(Intent().setClassName(BrowserComponentHost.PACKAGE, BrowserComponent.SERVICE),
                 connection, Context.BIND_AUTO_CREATE))
             assertTrue("Browser service did not bind", connected.await(10, TimeUnit.SECONDS))
         }
@@ -659,7 +666,7 @@ class PluginEmbeddedBrowserDeviceTest {
                 "title":"Synthetic Gecko test","origins":["https://example.com"],
                 "network":[{"origin":"https://example.com","pathPrefix":"/","methods":["GET"],"purposes":["query"]}]
             }""")) {
-            call("configure", configuration)
+            call("configure", configuration.put("protocol", BrowserComponent.PROTOCOL))
             initialized = true
         }
         fun call(action: String, input: JSONObject = JSONObject()): JSONObject =

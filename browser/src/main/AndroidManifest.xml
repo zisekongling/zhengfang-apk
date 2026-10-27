@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Declared identically by the App, so install order never matters. Only an APK signed
+         with the same key can hold it; both sides still verify the peer's signer per call. -->
+    <permission
+        android:name="${applicationId}.permission.BIND"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.permission.BIND" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <queries>
+        <package android:name="${hostPackage}" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true">
+        <activity
+            android:name="com.tyust.course.academic.plugin.PluginEmbeddedBrowserActivity"
+            android:exported="true"
+            android:permission="${applicationId}.permission.BIND"
+            android:process=":plugin_embedded_browser"
+            android:windowSoftInputMode="adjustResize" />
+        <service
+            android:name="com.tyust.course.academic.plugin.PluginEmbeddedBrowserService"
+            android:exported="true"
+            android:permission="${applicationId}.permission.BIND"
+            android:process=":plugin_embedded_browser" />
+        <!-- Profiles belong to the App's accounts: drop them when the App's data goes away. -->
+        <receiver
+            android:name="com.tyust.course.academic.plugin.BrowserHostRemovedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_DATA_CLEARED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -2,8 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-sdk tools:overrideLibrary="org.mozilla.geckoview" />
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -28,6 +26,13 @@
     <!-- 应用更新权限 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- On-demand GeckoView component: same signer only. Declared here too so install order never matters. -->
+    <permission android:name="${browserPackage}.permission.BIND" android:protectionLevel="signature" />
+    <uses-permission android:name="${browserPackage}.permission.BIND" />
+    <queries>
+        <package android:name="${browserPackage}" />
+    </queries>
+
     <application
         android:name=".CourseApplication"
         android:allowBackup="true"
@@ -46,8 +51,8 @@
         <activity android:name=".diagnostics.ErrorReportActivity" android:exported="false" android:theme="@style/Theme.CourseSelector" />
         <activity android:name=".academic.plugin.NativePluginActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".academic.plugin.PluginUserscriptActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name=".academic.plugin.PluginEmbeddedBrowserActivity" android:exported="false" android:process=":plugin_embedded_browser" android:windowSoftInputMode="adjustResize" />
-        <service android:name=".academic.plugin.PluginEmbeddedBrowserService" android:exported="false" android:process=":plugin_embedded_browser" />
+        <!-- GeckoView runs in the separately installed browser APK (module :browser). -->
+        <activity android:name=".academic.plugin.BrowserComponentActivity" android:exported="false" android:configChanges="uiMode" />
         <activity android:name=".academic.plugin.PluginLegacyWebActivity" android:exported="false" android:process=":plugin_legacy_web" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" android:windowSoftInputMode="adjustResize" />
         <service android:name=".academic.plugin.PluginLegacyWebService" android:exported="false" android:process=":plugin_legacy_web" />
         <service android:name=".academic.plugin.PluginForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />

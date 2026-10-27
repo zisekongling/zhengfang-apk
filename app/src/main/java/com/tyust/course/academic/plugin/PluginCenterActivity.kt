@@ -287,6 +287,7 @@ class PluginCenterActivity : ComponentActivity() {
                     SystemMenuAction("从文件安装", Icons.Outlined.FileOpen, { importer.launch(arrayOf("*/*")) }, enabled = !busy),
                     SystemMenuAction("刷新插件目录", Icons.Outlined.Refresh, { loadCatalog() }, enabled = !catalogLoading),
                     SystemMenuAction("打开插件商店", Icons.Outlined.Storefront, { web("/") }),
+                    SystemMenuAction("内置浏览器组件", Icons.Outlined.Public, { startActivity(BrowserComponentActivity.intent(this@PluginCenterActivity)) }),
                     SystemMenuAction("导入、回滚与开发工具", Icons.Outlined.Build, {
                         developerTools.launch(Intent(this@PluginCenterActivity, PluginDeveloperActivity::class.java)
                             .putExtra(EXTRA_TARGET_SCHOOL, targetSchoolId))

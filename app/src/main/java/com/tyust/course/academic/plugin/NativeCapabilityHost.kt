@@ -184,7 +184,7 @@ class NativeCapabilityHost internal constructor(
                 }
                 "userscript.rollback" -> PluginUserscripts.rollback(app, pkg, session, input.getString("scriptId"))
                 "userscript.start" -> {
-                    if (PluginEmbeddedBrowser.enabled(pkg, session)) PluginEmbeddedBrowser.requireSupport() else PluginUserscripts.requireSupport()
+                    if (PluginEmbeddedBrowser.enabled(pkg, session)) PluginEmbeddedBrowser.requireSupport(app) else PluginUserscripts.requireSupport()
                     if (scriptGrant != null) PluginEmbeddedBrowser.startScript(app, pkg, session, input.getString("scriptId"), input.getString("url"), scriptGrant)
                     else {
                         continuousPermission(flow, "启动原脚本任务", "按原脚本当前设置处理课程内容，包括已开启的答题和自动提交。离开页面后继续运行，可从常驻通知停止。考试页面不在运行范围。")

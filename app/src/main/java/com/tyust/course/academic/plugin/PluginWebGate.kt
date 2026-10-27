@@ -1,6 +1,5 @@
 package com.tyust.course.academic.plugin
 
-import java.net.URI
 import java.util.UUID
 
 /** A grant belongs to one committed main document, not merely to a WebView. */
@@ -9,7 +8,7 @@ class PluginWebGate(private val origin: String) {
     private var url: String? = null
     private val requests = mutableSetOf<String>()
     @Synchronized fun revoke() { token = null; url = null; requests.clear() }
-    fun owns(url: String): Boolean = runCatching { val uri = URI(url); uri.userInfo == null && "${uri.scheme}://${uri.rawAuthority}" == origin }.getOrDefault(false)
+    fun owns(url: String): Boolean = BrowserComponent.owns(origin, url)
     @Synchronized fun bind(url: String): String { revoke(); if (!owns(url)) denied(); this.url = url; return UUID.randomUUID().toString().also { token = it } }
     @Synchronized fun documentUrl(): String? = url
     @Synchronized fun current(instance: String): Boolean = token != null && token == instance

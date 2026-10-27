@@ -94,6 +94,10 @@ android {
         buildConfigField "String", "MAP_CONFIG_CLIENT_SECRET", quoteForBuildConfig(mapConfigClientSecret)
         buildConfigField "String", "AMAP_ANDROID_SDK_KEY", quoteForBuildConfig(isReleaseTask ? "" : (readSecret("AMAP_ANDROID_SDK_KEY") ?: ""))
         buildConfigField "boolean", "UI_PREVIEW", "false"
+        // The on-demand GeckoView component. Each App variant binds only to its matching browser.
+        buildConfigField "String", "BROWSER_PACKAGE", '"com.tyust.course.browser"'
+        buildConfigField "int", "BROWSER_MIN_VERSION", providers.gradleProperty('BROWSER_VERSION_CODE').get()
+        manifestPlaceholders = [browserPackage: "com.tyust.course.browser"]
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -133,6 +137,8 @@ android {
         uiPreview {
             initWith debug
             applicationIdSuffix '.uipreview'
+            buildConfigField "String", "BROWSER_PACKAGE", '"com.tyust.course.browser.uipreview"'
+            manifestPlaceholders = [browserPackage: "com.tyust.course.browser.uipreview"]
             versionNameSuffix '-ui-preview'
             matchingFallbacks = ['debug']
             signingConfig signingConfigs.debug
@@ -147,6 +153,8 @@ android {
             initWith release
             proguardFile 'benchmark-rules.pro'
             applicationIdSuffix '.benchmark'
+            buildConfigField "String", "BROWSER_PACKAGE", '"com.tyust.course.browser.benchmark"'
+            manifestPlaceholders = [browserPackage: "com.tyust.course.browser.benchmark"]
             versionNameSuffix '-benchmark'
             matchingFallbacks = ['release']
             signingConfig signingConfigs.debug
@@ -202,7 +210,8 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.webkit:webkit:1.14.0'
     // Loaded only by the private browser process on API 26+. Android 7 keeps the base App.
-    implementation 'org.mozilla.geckoview:geckoview:157.0.20261005135250'
+    // GeckoView is no longer bundled: it runs in the on-demand :browser APK.
+    implementation project(':browser-protocol')
     // The default 13.x artifact is Vulkan-only; MuMu Android 12 cannot create its surface.
     implementation 'org.maplibre.gl:android-sdk-opengl:13.6.1'
     implementation 'com.amap.api:3dmap-location-search:11.3.100_loc11.3.000_sea9.8.1'

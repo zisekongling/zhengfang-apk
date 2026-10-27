@@ -29,7 +29,7 @@ internal object EmbeddedBrowserRuntime {
     var extension: WebExtension? = null
     var activity: PluginEmbeddedBrowserActivity? = null
     var service: PluginEmbeddedBrowserService? = null
-    var title = "学习通"
+    var title = "插件浏览器"
     val pages = linkedMapOf<String, Page>()
     var visible: String? = null
     fun page(handle: String) = pages[handle]
@@ -59,7 +59,9 @@ class PluginEmbeddedBrowserService : Service() {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
             if (code != IBinder.FIRST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
             data.enforceInterface(PluginBrowserWire.DESCRIPTOR)
-            if (getCallingUid() != applicationInfo.uid) throw SecurityException("Private embedded browser")
+            // The bind permission is signature-level; still pin the exact App package and signer.
+            if (!BrowserComponent.trusted(this@PluginEmbeddedBrowserService, getCallingUid(), BrowserHostRemovedReceiver.hostPackage(this@PluginEmbeddedBrowserService)))
+                throw SecurityException("Private embedded browser")
             var action = ""
             val result = try {
                 val request = PluginBrowserWire.read(data); val incoming = data.readStrongBinder()
@@ -72,7 +74,12 @@ class PluginEmbeddedBrowserService : Service() {
         }
     }
     override fun onBind(intent: Intent?): IBinder { EmbeddedBrowserRuntime.service = this; return binder }
-    override fun onUnbind(intent: Intent?): Boolean { shutdown(); return false }
+    override fun onUnbind(intent: Intent?): Boolean {
+        // A short identity/retire bind never started Gecko: do not schedule the process kill,
+        // which would also take down an account connection that binds right after it.
+        if (EmbeddedBrowserRuntime.runtime == null && EmbeddedBrowserRuntime.profile == null) { stopSelf(); return false }
+        shutdown(); return false
+    }
     private suspend fun command(action: String, input: JSONObject): JSONObject {
         val port = nativePort ?: try { withTimeout(30_000) { ready.await() } }
             catch (e: TimeoutCancellationException) { throw PluginException(PluginErrorCode.TIMEOUT, "浏览器扩展连接超时，请重新打开课程", e) }
@@ -87,9 +94,14 @@ class PluginEmbeddedBrowserService : Service() {
             return response.optJSONObject("data") ?: JSONObject()
         } finally { replies.remove(id); result.cancel() }
     }
+    /** Lets the App reject a browser built from a different SDK contract before any page opens. */
+    private fun identity() = JSONObject().put("protocol", BrowserComponent.PROTOCOL).put("engine", ENGINE)
+        .put("geckoVersion", com.tyust.course.browser.BuildConfig.GECKO_VERSION)
+        .put("extension", JSONObject(BrowserComponent.extensionDigests(this) as Map<*, *>))
     private suspend fun initialize(profile: String, input: JSONObject, host: IBinder?) {
-        PluginEmbeddedBrowser.requireSupport()
-        if (!profile.matches(Regex("plugin_[a-f0-9]{64}"))) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "浏览器 profile 无效")
+        if (Build.VERSION.SDK_INT < 26) throw PluginException(PluginErrorCode.UNSUPPORTED, "内置浏览器需要 Android 8.0 或更新版本")
+        if (input.optInt("protocol") != BrowserComponent.PROTOCOL) throw PluginException(PluginErrorCode.UNSUPPORTED, "内置浏览器组件与 App 版本不匹配，请更新组件")
+        if (!profile.matches(BrowserComponent.PROFILE)) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "浏览器 profile 无效")
         if (EmbeddedBrowserRuntime.profile != null) {
             if (EmbeddedBrowserRuntime.profile != profile) throw PluginException(PluginErrorCode.CONFLICT, "旧浏览器账号尚未退出")
             return
@@ -176,9 +188,22 @@ class PluginEmbeddedBrowserService : Service() {
         })
         command("configure", input)
     }
+    /** The App owns accounts; it names the profiles to delete. The open profile is never touched. */
+    private fun retire(input: JSONObject): JSONObject {
+        val root = File(noBackupFilesDir, "embedded-browser")
+        val removed = JSONArray()
+        for (profile in strings(input.optJSONArray("profiles"))) {
+            if (!profile.matches(BrowserComponent.PROFILE) || profile == EmbeddedBrowserRuntime.profile) continue
+            val directory = File(root, profile)
+            if (directory.canonicalFile.parentFile == root.canonicalFile && (!directory.exists() || directory.deleteRecursively())) removed.put(profile)
+        }
+        return JSONObject().put("removed", removed)
+    }
     private suspend fun handle(request: JSONObject, host: IBinder?): JSONObject {
         val profile = request.getString("profile"); val action = request.getString("action"); val input = request.getJSONObject("input")
-        if (action == "configure") { initialize(profile, input, host); return JSONObject() }
+        if (action == "identity") return identity()
+        if (action == "retire") return retire(input)
+        if (action == "configure") { initialize(profile, input, host); return identity() }
         if (profile != EmbeddedBrowserRuntime.profile || closing) throw PluginException(PluginErrorCode.STALE_CONTEXT, "浏览器账号已失效")
         when (action) {
             "cookies.read" -> return command(action, input)
@@ -191,7 +216,7 @@ class PluginEmbeddedBrowserService : Service() {
                 return command(action, JSONObject().put("cookie", value))
             }
             "page.open" -> {
-                val origins = PluginJson.strings(input.getJSONArray("origins")).toSet()
+                val origins = strings(input.getJSONArray("origins")).toSet()
                 val url = input.getString("url")
                 if (!allows(url, origins)) throw PluginException(PluginErrorCode.UNTRUSTED_URL, "浏览器地址未声明")
                 val handle = input.optString("scriptHandle").takeIf { it.isNotEmpty() }
@@ -254,9 +279,9 @@ class PluginEmbeddedBrowserService : Service() {
     }
     private fun allows(url: String, origins: Set<String>) = url.toHttpUrlOrNull()?.let { target ->
         target.isHttps && target.username.isEmpty() && target.password.isEmpty() && !Regex("(?i)%2f|%5c|%00").containsMatchIn(target.encodedPath) &&
-            origins.any { PluginWebGate(it).owns(url) } && PluginJson.objects(config.optJSONArray("network") ?: JSONArray()).any { PluginWebGate(it.getString("origin")).owns(url) }
+            origins.any { BrowserComponent.owns(it, url) } && networkOrigins().any { BrowserComponent.owns(it, url) }
     } == true
-    private fun describe(page: EmbeddedBrowserRuntime.Page) = JSONObject().put("handle", page.handle).put("url", page.url).put("loading", page.loading).put("engine", "GeckoView 157")
+    private fun describe(page: EmbeddedBrowserRuntime.Page) = JSONObject().put("handle", page.handle).put("url", page.url).put("loading", page.loading).put("engine", ENGINE)
     private fun page(url: String, origins: Set<String>, scriptHandle: String?, active: Boolean, load: Boolean = true): EmbeddedBrowserRuntime.Page {
         if (EmbeddedBrowserRuntime.pages.size >= 8) throw PluginException(PluginErrorCode.RESOURCE_LIMIT, "最多打开 8 个浏览器页面")
         val settings = GeckoSessionSettings.Builder().allowJavascript(true)
@@ -287,7 +312,7 @@ class PluginEmbeddedBrowserService : Service() {
             override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> {
                 val runningScript = p.scriptHandle != null && script?.optString("handle") == p.scriptHandle
                 return GeckoResult.fromValue(if (PluginBrowserNavigation.allowsLocalSubframe(request.uri, runningScript) ||
-                    allows(request.uri, PluginJson.objects(config.getJSONArray("network")).map { it.getString("origin") }.toSet())) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
+                    allows(request.uri, networkOrigins())) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
             }
             override fun onLocationChange(session: GeckoSession, url: String?, perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
                 if (url != null) p.url = url
@@ -376,6 +401,11 @@ class PluginEmbeddedBrowserService : Service() {
         // Only use the watchdog if Gecko cannot finish shutdown at all.
         Handler(Looper.getMainLooper()).postDelayed({ terminateBrowserProcess() }, 8_000)
     }
+    private fun networkOrigins(): Set<String> = config.optJSONArray("network")?.let { list ->
+        (0 until list.length()).mapNotNull { list.optJSONObject(it)?.optString("origin") }.toSet()
+    }.orEmpty()
+    private fun strings(list: JSONArray?): List<String> = list?.let { (0 until it.length()).map(it::getString) }.orEmpty()
+    private companion object { val ENGINE = "GeckoView " + com.tyust.course.browser.BuildConfig.GECKO_VERSION.substringBefore('.') }
     private fun terminateBrowserProcess() {
         val name = if (Build.VERSION.SDK_INT >= 28) android.app.Application.getProcessName() else File("/proc/self/cmdline").readText().substringBefore('\u0000')
         if (name.endsWith(":plugin_embedded_browser")) Process.killProcess(Process.myPid())

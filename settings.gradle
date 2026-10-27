@@ -25,5 +25,8 @@ dependencyResolutionManagement {
 }
 
 include ':app'
+// GeckoView ships as a separately installed, same-signer APK. The App only binds to it.
+include ':browser-protocol'
+include ':browser'
 rootProject.name = "CourseSelector"
 

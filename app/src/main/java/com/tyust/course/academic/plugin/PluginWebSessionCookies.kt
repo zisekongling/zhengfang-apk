@@ -29,9 +29,18 @@ object PluginWebSessionCookies {
         val additionalOrigins = PluginJson.strings(server.optJSONArray("cookieOrigins")).toSet()
         val current = { active() && accounts.current(pkg, session) }
         if (PluginEmbeddedBrowser.enabled(pkg, serverId)) {
+            // The browser is an optional APK. Its Gecko profile holds the account only after a page
+            // has opened there; until then (or after an uninstall) the encrypted native store does.
+            val profile by lazy { accounts.profile(pkg, serverId, session.key.accountKey) }
+            val native = NativeWebCookieStore(NativePluginVault(app,
+                PluginStorageScope.session(session, pkg.manifest.id, !pkg.official)), additionalOrigins + origin, current)
+            val imported = java.util.concurrent.atomic.AtomicBoolean()
+            fun gecko(): Boolean = PluginEmbeddedBrowser.geckoAuthority(app, profile).also {
+                if (!it && imported.compareAndSet(false, true) && runCatching { PluginEmbeddedBrowser.importLegacy(app, profile, native) }.isFailure) imported.set(false)
+            }
             return ScopedWebCookieJar(origin, current,
-                { url -> PluginEmbeddedBrowser.cookie(app, pkg, session, current, "read", url) },
-                { url, cookie -> PluginEmbeddedBrowser.cookie(app, pkg, session, current, "write", url, cookie); Unit }, additionalOrigins)
+                { url -> if (gecko()) PluginEmbeddedBrowser.cookie(app, pkg, session, current, "read", url) else native.header(url) },
+                { url, cookie -> if (gecko()) PluginEmbeddedBrowser.cookie(app, pkg, session, current, "write", url, cookie) else native.set(url, cookie); Unit }, additionalOrigins)
         }
         val native = NativeWebCookieStore(NativePluginVault(app,
             PluginStorageScope.session(session, pkg.manifest.id, !pkg.official)), additionalOrigins + origin, current)

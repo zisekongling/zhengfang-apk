@@ -2,7 +2,7 @@ package com.tyust.course.academic.plugin
 
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-internal object PluginBrowserNavigation {
+object PluginBrowserNavigation {
     /** A running userscript builds question documents in srcdoc; it is never a top-level grant. */
     fun allowsLocalSubframe(value: String, runningScript: Boolean): Boolean =
         value == "about:blank" || runningScript && value == "about:srcdoc"

@@ -7,7 +7,7 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 
 /** Private UID-only IPC. Large scripts/responses travel through pipes, below Binder's size limit. */
-internal object PluginBrowserWire {
+object PluginBrowserWire {
     const val DESCRIPTOR = "com.tyust.course.plugin.embedded.v1"
     const val MAX_BYTES = 9 * 1024 * 1024
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)

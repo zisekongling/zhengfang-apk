@@ -4,14 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
-enum class PluginErrorCode {
-    UNSUPPORTED, NOT_OPEN, INVALID_CREDENTIALS, SESSION_EXPIRED, CAPTCHA_REQUIRED, WEB_LOGIN_REQUIRED,
-    NO_CAPACITY, CONFLICT, ALREADY_SELECTED, CREDIT_LIMIT, PAGE_CHANGED, NETWORK_RETRYABLE,
-    RESULT_UNKNOWN, UNTRUSTED_URL, VALIDATION_FAILED, TIMEOUT, CANCELLED, RUNTIME_EXITED,
-    RESOURCE_LIMIT, BAD_SIGNATURE, PERMISSION_DENIED, STALE_CONTEXT
-}
-
-class PluginException(val code: PluginErrorCode, message: String, cause: Throwable? = null) : Exception(message, cause)
+// PluginErrorCode and PluginException live in :browser-protocol (PluginErrors.kt),
+// so the separately installed browser reports the same codes over Binder.
 
 object PluginLimits {
     const val API_VERSION = 3

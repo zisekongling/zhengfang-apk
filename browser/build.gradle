@@ -1,0 +1,147 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// The GeckoView engine, installed on demand next to the App. Must be signed with the App's key:
+// both sides verify each other's signer before any account cookie crosses the Binder.
+def geckoVersion = providers.gradleProperty('BROWSER_GECKO_VERSION').get()
+def emulatorPreview = providers.gradleProperty('emulatorPreview').map { it.toBoolean() }.getOrElse(false)
+def isReleaseTask = gradle.startParameter.taskNames.any { taskName ->
+    def lower = taskName.toLowerCase()
+    (lower.contains('release') && (lower.contains('assemble') || lower.contains('bundle')))
+}
+def localSecrets = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) localSecrets.load(new FileInputStream(localPropertiesFile))
+def readSecret = { String name ->
+    def env = System.getenv(name)
+    if (env != null && !env.trim().isEmpty()) return env.trim()
+    def value = localSecrets.getProperty(name)
+    (value != null && !value.trim().isEmpty()) ? value.trim() : null
+}
+// Same keystore lookup as :app (paths there are relative to app/).
+def keystorePath = System.getenv("RELEASE_SIGNING_CONFIG_FILE")
+def releaseKeystoreFile = keystorePath != null ? rootProject.file('app').toPath().resolve(keystorePath).toFile()
+    : (rootProject.file('app/release-key.jks').exists() ? rootProject.file('app/release-key.jks') : null)
+def hasReleaseSigning = releaseKeystoreFile != null && readSecret("RELEASE_STORE_PASSWORD") != null &&
+    readSecret("RELEASE_KEY_ALIAS") != null && readSecret("RELEASE_KEY_PASSWORD") != null
+if (releaseKeystoreFile != null && isReleaseTask && !hasReleaseSigning) {
+    throw new GradleException("Release signing credentials are missing for :browser.")
+}
+
+android {
+    namespace 'com.tyust.course.browser'
+    compileSdkVersion 'android-37.0'
+
+    defaultConfig {
+        applicationId "com.tyust.course.browser"
+        // GeckoView requires Android 8; the App keeps working on 7 without this component.
+        minSdk 26
+        targetSdk 34
+        versionCode providers.gradleProperty('BROWSER_VERSION_CODE').get().toInteger()
+        versionName providers.gradleProperty('BROWSER_VERSION_NAME').get()
+        if (!isReleaseTask) {
+            ndk { abiFilters.addAll(emulatorPreview ? ['x86_64'] : ['arm64-v8a', 'armeabi-v7a']) }
+        }
+        buildConfigField "String", "GECKO_VERSION", "\"$geckoVersion\""
+        manifestPlaceholders = [hostPackage: "com.tyust.course"]
+        buildConfigField "String", "HOST_PACKAGE", "\"com.tyust.course\""
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile releaseKeystoreFile
+                storePassword readSecret("RELEASE_STORE_PASSWORD")
+                keyAlias readSecret("RELEASE_KEY_ALIAS")
+                keyPassword readSecret("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    // Per-ABI only: a universal Gecko APK would be ~140 MB.
+    splits {
+        abi {
+            enable isReleaseTask
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a'
+            universalApk false
+        }
+    }
+
+    // Mirror :app's variants so each App build binds to its own browser package.
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+        debug {
+            minifyEnabled false
+            debuggable true
+        }
+        uiPreview {
+            initWith debug
+            applicationIdSuffix '.uipreview'
+            versionNameSuffix '-ui-preview'
+            matchingFallbacks = ['debug']
+            signingConfig signingConfigs.debug
+            manifestPlaceholders = [hostPackage: "com.tyust.course.uipreview"]
+            buildConfigField "String", "HOST_PACKAGE", "\"com.tyust.course.uipreview\""
+        }
+        benchmark {
+            initWith release
+            applicationIdSuffix '.benchmark'
+            versionNameSuffix '-benchmark'
+            matchingFallbacks = ['release']
+            signingConfig signingConfigs.debug
+            manifestPlaceholders = [hostPackage: "com.tyust.course.benchmark"]
+            buildConfigField "String", "HOST_PACKAGE", "\"com.tyust.course.benchmark\""
+        }
+    }
+
+    packaging {
+        jniLibs.useLegacyPackaging = true
+        jniLibs.excludes += ['**/x86/**']
+        if (!emulatorPreview) jniLibs.excludes += ['**/x86_64/**']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+// The WebExtension bytes are locked by the SDK contract and checked by scripts/check_plugin_platform.py
+// at app/src/main/assets/academic-plugin/gecko. Package exactly those files; never keep a second copy.
+abstract class SyncGeckoExtension extends DefaultTask {
+    @InputDirectory abstract DirectoryProperty getExtensionDir()
+    @OutputDirectory abstract DirectoryProperty getOutputDir()
+    @TaskAction void run() {
+        def target = outputDir.get().dir('academic-plugin/gecko').asFile
+        target.deleteDir(); target.mkdirs()
+        extensionDir.get().asFile.listFiles().each { file -> java.nio.file.Files.copy(file.toPath(), new File(target, file.name).toPath()) }
+    }
+}
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def task = project.tasks.register("sync${variant.name.capitalize()}GeckoExtension", SyncGeckoExtension) {
+            extensionDir.set(rootProject.layout.projectDirectory.dir('app/src/main/assets/academic-plugin/gecko'))
+        }
+        variant.sources.assets.addGeneratedSourceDirectory(task, { it.outputDir })
+    }
+}
+
+dependencies {
+    implementation project(':browser-protocol')
+    implementation "org.mozilla.geckoview:geckoview:$geckoVersion"
+}

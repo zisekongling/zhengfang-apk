@@ -20,13 +20,39 @@ internal object PluginEmbeddedBrowser {
     fun enabled(pkg: PluginPackage, serverId: String) = PluginJson.objects(pkg.manifest.json.optJSONArray("servers") ?: JSONArray())
         .any { it.optString("id") == serverId && it.optJSONObject("browser")?.optString("engine") == "embedded" }
     fun enabled(pkg: PluginPackage, owner: AcademicSession) = enabled(pkg, owner.key.schoolId.removePrefix("service:${pkg.manifest.id}:"))
-    fun requireSupport() { if (Build.VERSION.SDK_INT < 26) throw PluginException(PluginErrorCode.UNSUPPORTED, "内置浏览器需要 Android 8.0 或更新版本，App 其他功能可继续使用") }
+    /** GeckoView is a separately installed APK; every browser entry point checks it first. */
+    fun requireSupport(app: Context) = BrowserComponentHost.require(app)
+    private fun service() = Intent().setClassName(BrowserComponentHost.PACKAGE, BrowserComponent.SERVICE)
+    private fun prefs(app: Context) = app.getSharedPreferences("plugin-embedded-migration-v2", Context.MODE_PRIVATE)
+    private val hostExtension = java.util.concurrent.atomic.AtomicReference<Map<String, String>>()
+
+    /**
+     * Who holds this account's cookies. Until a page has opened in the installed browser (and its
+     * native cookies moved there), the App's encrypted store stays authoritative, so native login,
+     * courses and attendance work without the component. A reinstall wipes Gecko data and reverts.
+     */
+    fun geckoAuthority(app: Context, profile: String): Boolean {
+        val identity = BrowserComponentHost.installIdentity(app) ?: return false
+        return prefs(app).getString("authority:$profile", null) == identity
+    }
+
+    /** Before 1.0.129 Gecko ran inside the App. Move that profile's cookies into the native store once. */
+    fun importLegacy(app: Context, profile: String, native: NativeWebCookieStore) = synchronized(PluginServiceAccounts.lock) {
+        val directory = File(app.noBackupFilesDir, "embedded-browser/$profile")
+        if (!directory.exists()) return@synchronized
+        // set() ignores foreign or malformed cookies; it throws only for a stale account or a vault
+        // failure, and then the old profile must stay for the next attempt.
+        LegacyGeckoCookies.read(File(directory, "cookies.sqlite")).forEach { (url, cookie) -> native.set(url, cookie) }
+        directory.deleteRecursively()
+        app.getSharedPreferences("plugin-embedded-migration", Context.MODE_PRIVATE).edit().remove(profile).commit()
+    }
 
     private class Connection(val app: Context, val pkg: PluginPackage, val session: AcademicSession, val profile: String, val server: JSONObject) : ServiceConnection {
         val ready = CompletableDeferred<IBinder>(); val died = CompletableDeferred<Unit>()
         val origins = PluginJson.strings(server.optJSONArray("cookieOrigins")).toSet() + server.getString("origin")
         val namespace = PluginStorageScope.session(session, pkg.manifest.id, !pkg.official)
         @Volatile var binder: IBinder? = null
+        @Volatile var engine = "GeckoView"
         @Volatile var script: Script? = null
         val scriptLock = Mutex()
         var migrationMessage = ""
@@ -49,7 +75,7 @@ internal object PluginEmbeddedBrowser {
             override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
                 if (code != IBinder.FIRST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
                 data.enforceInterface(PluginBrowserWire.DESCRIPTOR)
-                if (getCallingUid() != app.applicationInfo.uid) throw SecurityException("Private browser callback")
+                if (!BrowserComponent.trusted(app, getCallingUid(), BrowserComponentHost.PACKAGE)) throw SecurityException("Private browser callback")
                 val result = try {
                     val event = PluginBrowserWire.read(data)
                     val value = runBlocking { withTimeout(125_000) { receive(this@Connection, event) } }
@@ -98,7 +124,7 @@ internal object PluginEmbeddedBrowser {
             .put("revision", snapshots.incrementAndGet())
             .put("lastUrl", lastUrl).put("runningVersion", selected.getString("version")).put("adapterAvailable", available)
             .put("startPending", startRequested || startJob?.isActive == true)
-            .put("adapterVersion", policy.declaration.getJSONObject("adapter").getString("version")).put("engine", "GeckoView 157")
+            .put("adapterVersion", policy.declaration.getJSONObject("adapter").getString("version")).put("engine", owner.engine)
         }
         fun updateDocuments() = synchronized(this) {
             val states = documents.values.toList()
@@ -130,7 +156,7 @@ internal object PluginEmbeddedBrowser {
         if (connection === owner) connection = null
     }
     private suspend fun connect(app: Context, pkg: PluginPackage, owner: AcademicSession): Connection = mutex.withLock {
-        requireSupport()
+        requireSupport(app)
         val accounts = PluginServiceAccounts(app)
         if (!accounts.current(pkg, owner)) throw PluginException(PluginErrorCode.STALE_CONTEXT, "服务账号已改变")
         val serverId = owner.key.schoolId.removePrefix("service:${pkg.manifest.id}:")
@@ -143,11 +169,15 @@ internal object PluginEmbeddedBrowser {
         val next = Connection(app.applicationContext, pkg, session, profile, accounts.server(pkg, serverId))
         try {
             withContext(Dispatchers.Main) {
-                if (!next.app.bindService(Intent(next.app, PluginEmbeddedBrowserService::class.java), next, Context.BIND_AUTO_CREATE)) throw PluginException(PluginErrorCode.UNSUPPORTED, "无法连接内置浏览器")
+                // Some ROMs block cross-app binds unless "associated start" is allowed for this App.
+                if (!next.app.bindService(service(), next, Context.BIND_AUTO_CREATE)) throw PluginException(PluginErrorCode.UNSUPPORTED, "无法连接内置浏览器组件；如系统限制了应用关联启动，请允许后重试")
             }
             withTimeout(30_000) { next.ready.await() }
             connection = next
-            rpc(next, "configure", JSONObject().put("origins", JSONArray(next.origins.toList())).put("network", JSONArray(pkg.manifest.network)).put("title", pkg.manifest.name))
+            val identity = rpc(next, "configure", JSONObject().put("protocol", BrowserComponent.PROTOCOL).put("origins", JSONArray(next.origins.toList()))
+                .put("network", JSONArray(pkg.manifest.network)).put("title", pkg.manifest.name))
+            requireContract(app, identity)
+            next.engine = identity.optString("engine", next.engine)
             migrate(next)
             next.check(); next
         } catch (e: Throwable) {
@@ -155,10 +185,21 @@ internal object PluginEmbeddedBrowser {
             throw e
         }
     }
+    /** The four WebExtension files are SDK contract bytes: the component must carry exactly the App's. */
+    private fun requireContract(app: Context, identity: JSONObject) {
+        val expected = hostExtension.get() ?: BrowserComponent.extensionDigests(app).also(hostExtension::set)
+        val actual = identity.optJSONObject("extension")
+        if (identity.optInt("protocol") != BrowserComponent.PROTOCOL || actual == null || expected.any { (name, digest) -> actual.optString(name) != digest })
+            throw PluginException(PluginErrorCode.UNSUPPORTED, "内置浏览器组件与当前 App 不匹配，请在“内置浏览器”页面更新组件")
+    }
     private suspend fun migrate(owner: Connection) = withContext(Dispatchers.IO) {
-        val prefs = owner.app.getSharedPreferences("plugin-embedded-migration", Context.MODE_PRIVATE)
-        if (prefs.getBoolean(owner.profile, false)) return@withContext
+        val identity = BrowserComponentHost.installIdentity(owner.app) ?: return@withContext
+        val prefs = prefs(owner.app)
+        if (prefs.getString("authority:${owner.profile}", null) == identity) return@withContext
         val native = NativeWebCookieStore(NativePluginVault(owner.app, owner.namespace, guard = owner::check), owner.origins, owner::valid)
+        importLegacy(owner.app, owner.profile, native)
+        // From here this install owns the account's cookies, also when the copy below is unconfirmed.
+        check(prefs.edit().putString("authority:${owner.profile}", identity).commit())
         val snapshot = native.migrationSnapshot()
         if (snapshot != null) {
             try {
@@ -169,7 +210,7 @@ internal object PluginEmbeddedBrowser {
                     if (cookie.expiresAt > System.currentTimeMillis() && rpc(owner, "cookies.read", JSONObject().put("url", url)).optString("header").split(';').none { it.trim() == "${cookie.name}=${cookie.value}" })
                         throw PluginException(PluginErrorCode.SESSION_EXPIRED, "旧登录状态迁移尚未确认")
                 }
-                native.finishMigration(snapshot) { check(prefs.edit().putBoolean(owner.profile, true).commit()) }
+                native.finishMigration(snapshot) {}
             } catch (_: Exception) { owner.migrationMessage = "旧登录数据已保留，迁移未确认；请在内置浏览器重新登录" }
         } else {
             // WebView's header-only API cannot faithfully export path/expiry/HttpOnly metadata.
@@ -179,7 +220,6 @@ internal object PluginEmbeddedBrowser {
                 androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE) && androidx.webkit.ProfileStore.getInstance().allProfileNames.contains(owner.profile)
             }.getOrDefault(false) }
             if (legacy || modern) owner.migrationMessage = "旧网页登录数据已保留；内置浏览器请重新登录一次"
-            else check(prefs.edit().putBoolean(owner.profile, true).commit())
         }
     }
     fun cookie(app: Context, pkg: PluginPackage, owner: AcademicSession, active: () -> Boolean, action: String, url: String, value: String = ""): String {
@@ -207,8 +247,9 @@ internal object PluginEmbeddedBrowser {
         val result = rpc(c, "page.open", JSONObject().put("url", input.getString("url")).put("origins", JSONArray(c.origins.toList())))
         show(app, result.getString("handle")); return result
     }
+    fun activity(handle: String): Intent = Intent().setClassName(BrowserComponentHost.PACKAGE, BrowserComponent.ACTIVITY).putExtra("handle", handle)
     private suspend fun show(app: Context, handle: String) = withContext(Dispatchers.Main) {
-        app.startActivity(Intent(app, PluginEmbeddedBrowserActivity::class.java).putExtra("handle", handle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        app.startActivity(activity(handle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     suspend fun pageControl(app: Context, pkg: PluginPackage, owner: AcademicSession, handle: String, close: Boolean): JSONObject {
         val c = connection?.takeIf { it.pkg.manifest.id == pkg.manifest.id && it.namespace == PluginStorageScope.session(owner, pkg.manifest.id, !pkg.official) } ?: throw PluginException(PluginErrorCode.NOT_OPEN, "浏览器会话已关闭")
@@ -221,7 +262,7 @@ internal object PluginEmbeddedBrowser {
         if (live != null) return live.describe(status)
         val saved = withContext(Dispatchers.IO) { NativePluginVault(app, PluginStorageScope.session(owner, pkg.manifest.id, !pkg.official)).get("userscript:$id:last") }
         return status.put("status", if (saved?.optString("status") in setOf("loading", "entry", "ready", "running", "needs_input", "unavailable", "error")) "interrupted" else saved?.optString("status") ?: "idle")
-            .put("lastUrl", saved?.optString("url").orEmpty()).put("message", saved?.optString("message").orEmpty()).put("engine", "GeckoView 157")
+            .put("lastUrl", saved?.optString("url").orEmpty()).put("message", saved?.optString("message").orEmpty()).put("engine", BrowserComponentHost.engine(app))
     }
     internal suspend fun startScript(app: Context, pkg: PluginPackage, owner: AcademicSession, id: String, url: String, automation: NativeForegroundScriptGrant? = null): JSONObject {
         val store = PluginUserscripts.store(app, pkg, owner, id)
@@ -562,14 +603,41 @@ internal object PluginEmbeddedBrowser {
     fun retire(app: Context, profiles: Set<String>) {
         scope.launch(Dispatchers.IO) {
             mutex.withLock {
-                for (profile in profiles.filter { it.matches(Regex("plugin_[a-f0-9]{64}")) }) {
+                val prefs = prefs(app)
+                val identity = BrowserComponentHost.installIdentity(app)
+                val remote = mutableListOf<String>()
+                for (profile in profiles.filter { it.matches(BrowserComponent.PROFILE) }) {
                     connection?.takeIf { it.profile == profile }?.let { runCatching { disconnect(it) }; if (!it.died.isCompleted) return@withLock }
+                    // Profiles created before the browser became a separate APK.
                     val root = File(app.noBackupFilesDir, "embedded-browser")
                     val directory = File(root, profile)
                     if (directory.canonicalFile.parentFile == root.canonicalFile) directory.deleteRecursively()
                     app.getSharedPreferences("plugin-embedded-migration", Context.MODE_PRIVATE).edit().remove(profile).commit()
+                    prefs.edit().remove("authority:$profile").commit()
+                    if (identity != null && prefs.getString("retired:$profile", null) != identity) remote += profile
+                }
+                if (remote.isEmpty() || !BrowserComponentHost.status(app).ready) return@withLock
+                runCatching { retireRemote(app, remote) }.getOrNull()?.let { removed ->
+                    val edit = prefs.edit(); removed.forEach { edit.putString("retired:$it", identity) }; edit.commit()
                 }
             }
         }
+    }
+
+    /** A short-lived bind just to delete profiles in the browser APK's own storage. */
+    private suspend fun retireRemote(app: Context, profiles: List<String>): List<String> {
+        val ready = CompletableDeferred<IBinder>()
+        val binding = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, service: IBinder) { ready.complete(service) }
+            override fun onServiceDisconnected(name: ComponentName) { ready.cancel() }
+            override fun onNullBinding(name: ComponentName) { ready.cancel() }
+        }
+        if (!withContext(Dispatchers.Main) { app.bindService(service(), binding, Context.BIND_AUTO_CREATE) }) return emptyList()
+        try {
+            val binder = withTimeout(15_000) { ready.await() }
+            if (!BrowserComponent.sameSigner(app, BrowserComponentHost.PACKAGE)) return emptyList()
+            val result = PluginBrowserWire.call(binder, JSONObject().put("profile", "").put("action", "retire").put("input", JSONObject().put("profiles", JSONArray(profiles))))
+            return PluginJson.strings(result.optJSONArray("removed"))
+        } finally { withContext(Dispatchers.Main + NonCancellable) { runCatching { app.unbindService(binding) } } }
     }
 }

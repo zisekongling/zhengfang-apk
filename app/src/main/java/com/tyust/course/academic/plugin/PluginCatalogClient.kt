@@ -114,13 +114,3 @@ class PluginCatalogClient(private val endpoint: String, private val keys: Map<St
 
 private class CatalogMissing : java.io.IOException("插件目录尚未提供")
 
-internal fun java.io.InputStream.readBytesBounded(limit: Int): ByteArray {
-    val output = java.io.ByteArrayOutputStream()
-    val buffer = ByteArray(8192)
-    while (true) {
-        val n = read(buffer); if (n < 0) break
-        if (output.size() + n > limit) throw PluginException(PluginErrorCode.RESOURCE_LIMIT, "下载内容超过上限")
-        output.write(buffer, 0, n)
-    }
-    return output.toByteArray()
-}
