@@ -670,6 +670,53 @@ class ScheduleWidgetTest {
         assertEquals("主校区 明理教学楼 B302（实验机房）", longCourse.location)
     }
 
+    /** 并排的“时间 地点”一行要按中文教室的行高规划：大字体下数字时间比中文矮，只算时间会裁掉教室。 */
+    @Test @Config(sdk = [33]) @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun gridInlineTimeAndChineseRoomRowIsNotClippedAtLargeFont() {
+        val periods = (1..4).associateWith { "%02d:00".format(8 + it * 2 - 2) }
+        val ends = (1..4).associateWith { "%02d:45".format(8 + it * 2 - 2) }
+        val room = course.copy(name = "高等数学", location = "电教202")
+        val courses = (1..4).map { room.copy(id = "grid$it", startPeriod = it, endPeriod = it) }
+        val state = ScheduleWidgetState.from(snapshot().copy(courses = courses, timeBase = ScheduleTimeBase("2026-09-07", periods, ends)), now)
+        for (font in listOf(1f, 1.3f, 1.6f, 2f)) for ((width, height) in listOf(250 to 110, 280 to 180, 360 to 240)) {
+            val sized = context.createConfigurationContext(Configuration(context.resources.configuration).apply { fontScale = font })
+            val root = ScheduleWidgetRenderer.views(sized, state, width, height, ScheduleWidgetStyle.Grid).apply(sized, FrameLayout(sized)) as ViewGroup
+            val density = sized.resources.displayMetrics.density
+            root.measure(View.MeasureSpec.makeMeasureSpec((width * density).toInt(), View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec((height * density).toInt(), View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+            val cards = mutableListOf<ViewGroup>()
+            fun collectCards(view: View) {
+                if (view.visibility != View.VISIBLE) return
+                if (view.id == R.id.widget_course && view is ViewGroup) cards += view
+                else if (view is ViewGroup) for (i in 0 until view.childCount) collectCards(view.getChildAt(i))
+            }
+            collectCards(root)
+            assertTrue("$width/$height font=$font shows no cards", cards.isNotEmpty())
+            for (card in cards) {
+                val labels = mutableListOf<TextView>()
+                fun collect(view: View) {
+                    if (view.visibility != View.VISIBLE) return
+                    if (view is TextView && view.text.isNotEmpty()) labels += view
+                    if (view is ViewGroup) for (i in 0 until view.childCount) collect(view.getChildAt(i))
+                }
+                collect(card)
+                assertTrue(labels.any { it.id == R.id.widget_location && it.text.toString() == "电教202" })
+                for (text in labels) {
+                    val name = sized.resources.getResourceEntryName(text.id)
+                    val layout = requireNotNull(text.layout)
+                    assertTrue("$width/$height font=$font clipped $name: ${text.height} < ${layout.height}", text.height >= layout.height)
+                    val rect = Rect(0, 0, text.width, text.height)
+                    card.offsetDescendantRectToMyCoords(text, rect)
+                    assertTrue("$width/$height font=$font $name leaves its card: $rect in ${card.height}", rect.top >= 0 && rect.bottom <= card.height)
+                    val parent = text.parent as View
+                    assertTrue("$width/$height font=$font $name overflows its row", text.bottom <= parent.height)
+                    for (line in 0 until layout.lineCount) assertEquals("$name ellipsized", 0, layout.getEllipsisCount(line))
+                }
+            }
+        }
+    }
+
     @Test @Config(sdk = [33]) @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun everyStyleRendersAtSeveralSizesAndTimelineCoursesOpenTheirOwnDetails() {
         val state = ScheduleWidgetState.from(snapshot().copy(courses = listOf(course, course.copy(id = "next", startPeriod = 2, endPeriod = 2))), now)

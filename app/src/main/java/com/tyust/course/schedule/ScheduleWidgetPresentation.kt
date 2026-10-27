@@ -624,7 +624,6 @@ internal object ScheduleWidgetRenderer {
         }
         fun card(item: ScheduleOccurrence, columns: Int): Card = cards.getOrPut(columns to item) {
             val cardFitter = fitter(columns)
-            val textWidth = ((width - padding * 2 - gap * (columns - 1)).toFloat() / columns - 26).coerceAtLeast(1f) * density
             val room = item.course.location.ifBlank { "教室待定" }
             val name = ScheduleWidgetText(item.course.name, 14f, bold = true)
             val teacher = if (showTeacher) ScheduleWidgetText(item.course.teacher.ifBlank { "教师待定" }, 12f, margin = 2f) else null
@@ -632,13 +631,12 @@ internal object ScheduleWidgetRenderer {
             fun build(time: String, inline: Boolean, fields: List<ScheduleWidgetText>) = Card(item, time, inline, fields,
                 cardFitter.height(fields) + cardFitter.dp(cardPadding * 2f), cardFitter.fits(fields, Int.MAX_VALUE))
             // 先试“08:00 - 09:40”，窄一点时去掉连字符两侧空格。时间和地点分开测量：
-            // 地点只能用时间右边、隔 5dp 之后剩下的宽度，且必须一行放下。
+            // 地点只能用时间右边、隔 5dp 之后剩下的宽度，且必须一行放下；
+            // 这一行按两者基线对齐后的实际高度计入卡片（中文教室比数字时间更高）。
             for (time in listOf(full, full.replace(" - ", "-"))) {
-                val timeField = ScheduleWidgetText(time, 12f, margin = 2f, singleLine = true)
-                if (!cardFitter.fits(listOf(timeField), Int.MAX_VALUE)) continue
-                val rest = textWidth - cardFitter.lineWidth(timeField) - px(5) - 1
-                if (rest > 0 && ScheduleWidgetTextFitter(context, rest)
-                        .fits(listOf(ScheduleWidgetText(room, 12f, singleLine = true)), Int.MAX_VALUE))
+                val timeField = ScheduleWidgetText(time, 12f, margin = 2f, singleLine = true,
+                    beside = ScheduleWidgetText(room, 12f, singleLine = true), besideGap = px(5))
+                if (cardFitter.fits(listOf(timeField), Int.MAX_VALUE))
                     return@getOrPut build(time, true, listOfNotNull(name, teacher, timeField))
             }
             val time = listOf(full, full.replace(" - ", "-"))
