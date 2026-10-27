@@ -129,6 +129,8 @@ android {
         debug {
             minifyEnabled false
             debuggable true
+            applicationIdSuffix '.dev'
+            versionNameSuffix '-dev'
         }
         uiPreview {
             initWith debug

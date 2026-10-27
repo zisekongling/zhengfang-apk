@@ -652,7 +652,9 @@ internal object ScheduleWidgetRenderer {
             val rowCount = (planned.size + columns - 1) / columns
             // 先左列、后右列：上午的课在左，下午的课在右，和课表的阅读顺序一致。
             val rows = (0 until rowCount).map { row -> (0 until columns).map { column -> planned.getOrNull(column * rowCount + row) } }
-            val heights = rows.map { row -> row.filterNotNull().maxOf { it.height } }
+            // 每行统一用最高那张卡的高度，避免各行课程卡高低不一。
+            val rowHeight = planned.maxOf { it.height }
+            val heights = rows.map { rowHeight }
             return Plan(fitter(columns), rows, heights)
         }
         fun candidates(limit: Int) = if (tomorrowMode) all.take(limit) else timelineItems(state, limit)
