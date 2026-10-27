@@ -67,15 +67,15 @@ jobs:
           if [ "$STABLE_KEY" = true ]; then
             KEY_NOTE="使用仓库固定的 debug 签名，可直接覆盖安装之前的预览版。"
           else
-            KEY_NOTE="本次 debug 签名由 CI 临时生成：安装前需卸载之前的预览版（以及正式版）。"
+            KEY_NOTE="本次 debug 签名由 CI 临时生成：安装前需卸载之前的预览版。"
           fi
           {
             echo "调试预览，**不是正式版本**。源码：\`${REF}\` @ \`${SHA}\`。"
             echo
-            echo "- \`zhengfang-${VERSION}-debug.apk\`：主 App（不含 GeckoView）"
-            echo "- \`browser-${BROWSER}-debug.apk\`：内置浏览器组件（GeckoView，Android 8+）"
+            echo "- \`zhengfang-${VERSION}-debug.apk\`：主 App \`com.tyust.course.debug\`（不含 GeckoView）"
+            echo "- \`browser-${BROWSER}-debug.apk\`：内置浏览器组件 \`com.tyust.course.browser.debug\`（GeckoView，Android 8+）"
             echo
-            echo "两个包同一签名，须成对安装。${KEY_NOTE}"
+            echo "两个包同一签名，须成对安装。包名带 .debug，可与正式版同时安装，账号数据互不影响。${KEY_NOTE}"
             echo "安装：先装主 App，再在插件中心 → 菜单 →「内置浏览器组件」→「从文件安装组件」选浏览器 APK，或用 adb 安装两个包。"
             echo
             echo "SHA-256"

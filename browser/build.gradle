@@ -80,6 +80,9 @@ android {
         debug {
             minifyEnabled false
             debuggable true
+            applicationIdSuffix '.debug'
+            manifestPlaceholders = [hostPackage: "com.tyust.course.debug"]
+            buildConfigField "String", "HOST_PACKAGE", "\"com.tyust.course.debug\""
         }
         uiPreview {
             initWith debug

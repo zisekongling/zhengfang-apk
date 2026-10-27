@@ -133,6 +133,10 @@ android {
         debug {
             minifyEnabled false
             debuggable true
+            // Installs next to the official App; pairs with com.tyust.course.browser.debug.
+            applicationIdSuffix '.debug'
+            buildConfigField "String", "BROWSER_PACKAGE", '"com.tyust.course.browser.debug"'
+            manifestPlaceholders = [browserPackage: "com.tyust.course.browser.debug"]
         }
         uiPreview {
             initWith debug
