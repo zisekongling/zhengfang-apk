@@ -24,4 +24,20 @@
     <string name="schedule_widget_detail">课程时间与上课地点</string>
     <string name="schedule_widget_footer">点按进入完整课表</string>
     <string name="schedule_widget_preview_start">08:00</string>
+    <string name="schedule_widget_grid_name">今日课程</string>
+    <string name="schedule_widget_grid_description">4×2 今日课程网格，显示日期、周次与课程总数，每门课一张彩色卡片，完整显示课名、时间与教室；拉大可查看更多课程。</string>
+    <string name="schedule_widget_grid_preview_heading">10.26 周一 · 第8周</string>
+    <string name="schedule_widget_grid_preview_count">共4节课</string>
+    <string name="schedule_widget_grid_preview_name_1">大学物理</string>
+    <string name="schedule_widget_grid_preview_time_1">08:00 - 09:40</string>
+    <string name="schedule_widget_grid_preview_room_1">电教202</string>
+    <string name="schedule_widget_grid_preview_name_2">概率论与数理统计</string>
+    <string name="schedule_widget_grid_preview_time_2">10:00 - 11:40</string>
+    <string name="schedule_widget_grid_preview_room_2">主教404</string>
+    <string name="schedule_widget_grid_preview_name_3">军事理论</string>
+    <string name="schedule_widget_grid_preview_time_3">14:00 - 15:40</string>
+    <string name="schedule_widget_grid_preview_room_3">电教501</string>
+    <string name="schedule_widget_grid_preview_name_4">中国近代史纲要</string>
+    <string name="schedule_widget_grid_preview_time_4">16:00 - 17:40</string>
+    <string name="schedule_widget_grid_preview_room_4">厚德楼B302</string>
 </resources>

@@ -46,8 +46,12 @@ fun ScheduleWidgetPicker(onDismiss: () -> Unit) {
                 }
                 Text(style.description, style = MaterialTheme.typography.bodySmall)
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val width = minOf(maxWidth.value.toInt(), if (style == ScheduleWidgetStyle.Single) 88 else 176)
-                    val height = if (style == ScheduleWidgetStyle.Double) width / 2 else width
+                    val width = minOf(maxWidth.value.toInt(), when (style) {
+                        ScheduleWidgetStyle.Single -> 88
+                        ScheduleWidgetStyle.Grid -> 300
+                        else -> 176
+                    })
+                    val height = if (style == ScheduleWidgetStyle.Double || style == ScheduleWidgetStyle.Grid) width / 2 else width
                     AndroidView(factory = { ctx -> FrameLayout(ctx) }, modifier = Modifier.width(width.dp).height(height.dp),
                         update = { host ->
                             host.removeAllViews()

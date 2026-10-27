@@ -41,12 +41,14 @@ open class ScheduleWidgetProvider : AppWidgetProvider() {
 class ScheduleSingleWidgetProvider : ScheduleWidgetProvider()
 class ScheduleTimelineWidgetProvider : ScheduleWidgetProvider()
 class ScheduleCountdownWidgetProvider : ScheduleWidgetProvider()
+class ScheduleGridWidgetProvider : ScheduleWidgetProvider()
 
 enum class ScheduleWidgetStyle(val title: String, val description: String, val provider: Class<out AppWidgetProvider>) {
     Single("简洁单课", "1×1 · 课名、时间与地点，放大查看更多", ScheduleSingleWidgetProvider::class.java),
     Double("双课程", "2×1 · 两张课程卡，放大补充教师与状态", ScheduleWidgetProvider::class.java),
     Timeline("课程时间轴", "2×2 · 今日时间轴，拉大查看更多课程", ScheduleTimelineWidgetProvider::class.java),
-    Countdown("倒计时", "2×1 · 距上课与下课还有多久，实时走动", ScheduleCountdownWidgetProvider::class.java)
+    Countdown("倒计时", "2×1 · 距上课与下课还有多久，实时走动", ScheduleCountdownWidgetProvider::class.java),
+    Grid("今日课程", "4×2 · 日期、周次与课程总数，今日课程彩色卡片两列排列", ScheduleGridWidgetProvider::class.java)
 }
 
 /** Local cache reads and a wakeup boundary alarm; never performs authentication or network work. */

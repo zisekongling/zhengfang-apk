@@ -152,6 +152,7 @@ class ScheduleAgendaComponentDeviceTest {
                     ScheduleWidgetStyle.Double -> 130 to 56
                     ScheduleWidgetStyle.Timeline -> 130 to 130
                     ScheduleWidgetStyle.Countdown -> 130 to 56
+                    ScheduleWidgetStyle.Grid -> 180 to 110
                 }
                 for ((dimensions, scale) in listOf(minimum to 1f, minimum to 1.6f, (280 to 240) to 1f, (150 to 110) to 2f, (360 to 360) to 1.6f)) {
                     compose.runOnIdle {
@@ -183,7 +184,9 @@ class ScheduleAgendaComponentDeviceTest {
                         }
                         check(requireNotNull(rendered))
                         assertEquals(first.name, rendered!!.findViewById<TextView>(R.id.widget_name).text.toString())
-                        assertEquals(View.VISIBLE, rendered!!.findViewById<View>(R.id.widget_teacher).visibility)
+                        // 今日课程网格只在 320×220dp 以上才补充教师，这里的尺寸都不显示。
+                        if (kind != ScheduleWidgetStyle.Grid)
+                            assertEquals(View.VISIBLE, rendered!!.findViewById<View>(R.id.widget_teacher).visibility)
                         assertTrue(rendered!!.findViewById<View>(R.id.widget_course).isClickable)
                     }
                     capture("style-${kind.name}-${if (night) "dark" else "light"}-${dimensions.first}-${dimensions.second}-font$scale")
