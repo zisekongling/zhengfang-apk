@@ -1628,6 +1628,11 @@
                     "type": "integer",
                     "minimum": 300,
                     "maximum": 2592000
+                  },
+                  "providerId": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9_.:-]{0,95}$",
+                    "description": "Pull widgets: the contributes.dataProviders entry the host queries."
                   }
                 },
                 "required": [],

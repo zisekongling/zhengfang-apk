@@ -299,6 +299,7 @@ private fun PluginWidgetConfigScreen(activity: Activity, appWidgetId: Int, famil
                     )
                     PluginWidgets.refreshId(context, appWidgetId)
                     PluginWidgets.rescheduleCountdown(context)
+                    if (!declaration.push) PluginWidgetPullService.requestImmediate(context, item.pkg.manifest.id)
                     activity.setResult(
                         Activity.RESULT_OK,
                         Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId),

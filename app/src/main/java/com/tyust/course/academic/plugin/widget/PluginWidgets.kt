@@ -48,6 +48,7 @@ object PluginWidgets {
         }
         val declaration = PluginWidgetContract.declaration(manifest, widgetId)
             ?: widgetInvalid("插件未声明小组件：$widgetId")
+        if (!declaration.push) widgetInvalid("拉取式小组件由宿主拉取，不接受插件写入快照")
         val viewKey = declaration.viewKey(input.optString("viewKey"))
         val snapshot = input.optJSONObject("snapshot")
             ?: widgetInvalid("缺少小组件快照")
@@ -108,6 +109,7 @@ object PluginWidgets {
             PluginWidgetBindings.delete(context, binding.appWidgetId)
         }
         WidgetSnapshotStore.clearPlugin(context, pluginId)
+        PluginWidgetPullService.cancel(context, pluginId)
         rescheduleCountdown(context)
     }
 

@@ -172,6 +172,12 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/plugin_widget_large_info" />
         </receiver>
+        <!-- 拉取式（pull）小组件的后台刷新：每插件一个周期 job + 按需的一次性 job。
+             只做 data.query 拉取，不接触页面；不允许其它应用绑定。 -->
+        <service
+            android:name=".academic.plugin.widget.PluginWidgetPullService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
         <receiver android:name=".schedule.CourseReminderReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

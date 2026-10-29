@@ -48,6 +48,8 @@ object PluginWidgetContract {
         val options: List<Option>,
         val push: Boolean,
         val staleAfterSeconds: Long,
+        /** Pull widgets only: the `contributes.dataProviders` entry the host queries. */
+        val providerId: String,
         val json: JSONObject,
     ) {
         /** `viewKey` is optional on publish: an omitted key replaces the declared default view. */
@@ -81,6 +83,7 @@ object PluginWidgetContract {
                 },
                 push = mode != "pull",
                 staleAfterSeconds = refresh?.optLong("staleAfterSeconds", DEFAULT_STALE_SECONDS) ?: DEFAULT_STALE_SECONDS,
+                providerId = refresh?.optString("providerId").orEmpty(),
                 json = item,
             )
         }
@@ -112,7 +115,9 @@ object PluginWidgetContract {
         if ((requires["widget.render"] ?: 0) < 1) widgetInvalid("小组件需要声明 requires: widget.render@1")
         if (manifest.json.optInt("minAppVersionCode") < MIN_APP_VERSION)
             widgetInvalid("小组件需要声明 minAppVersionCode $MIN_APP_VERSION")
-        val providers = manifest.contributes.optJSONArray("dataProviders")?.length() ?: 0
+        val providerIds = PluginJson.objects(manifest.contributes.optJSONArray("dataProviders") ?: JSONArray())
+            .map { it.optString("id") }.filter(String::isNotBlank).toSet()
+        val providers = providerIds.size
         val declarations = declarations(manifest)
         val ids = declarations.map { it.id }
         if (ids.toSet().size != ids.size) widgetInvalid("小组件 ID 重复")
@@ -133,8 +138,11 @@ object PluginWidgetContract {
                 widgetInvalid("小组件 ${widget.id} 配置项类型无效")
             if (widget.push) {
                 if ((requires["widget.publish"] ?: 0) < 1) widgetInvalid("推送式小组件需要声明 requires: widget.publish@1")
-            } else if (providers == 0) {
-                widgetInvalid("拉取式小组件需要声明 contributes.dataProviders")
+            } else {
+                if (providers == 0) widgetInvalid("拉取式小组件需要声明 contributes.dataProviders")
+                if (widget.providerId.isBlank()) widgetInvalid("拉取式小组件 ${widget.id} 需要声明 refresh.providerId")
+                if (widget.providerId !in providerIds)
+                    widgetInvalid("小组件 ${widget.id} 的 refresh.providerId 未在 contributes.dataProviders 中声明")
             }
             if (widget.options.size > 8) widgetInvalid("小组件 ${widget.id} 配置项过多")
         }

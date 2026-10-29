@@ -21,6 +21,8 @@ abstract class PluginWidgetProvider : AppWidgetProvider() {
     ) {
         PluginWidgets.refreshIds(context, appWidgetIds)
         PluginWidgets.rescheduleCountdown(context)
+        // Launcher broadcasts have a ~10s budget: enqueue pull reads instead of running plugin code here.
+        PluginWidgetPull.requestForBindings(context, appWidgetIds)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -37,7 +39,11 @@ abstract class PluginWidgetProvider : AppWidgetProvider() {
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_DATE_CHANGED,
-            -> PluginWidgets.refreshAll(context)
+            -> {
+                PluginWidgets.refreshAll(context)
+                // Boot/time changes invalidate any pulled snapshot; jobs are persisted so only enqueue reads.
+                PluginWidgetPull.requestAll(context)
+            }
         }
     }
 
