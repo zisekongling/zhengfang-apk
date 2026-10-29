@@ -1,0 +1,66 @@
+package com.tyust.course.academic.plugin.widget
+
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+
+/**
+ * Base provider for plugin widgets.
+ *
+ * Launcher providers are static (declared in the manifest), so all three size families share this
+ * behaviour: read the binding, read the plugin's stored snapshot, render RemoteViews. No plugin code
+ * is ever executed from here.
+ */
+abstract class PluginWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        PluginWidgets.refreshIds(context, appWidgetIds)
+        PluginWidgets.rescheduleCountdown(context)
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        when (intent.action) {
+            PluginWidgets.ACTION_REFRESH, PluginWidgets.ACTION_CYCLE -> {
+                val id = intent.getIntExtra(
+                    AppWidgetManager.EXTRA_APPWIDGET_ID,
+                    AppWidgetManager.INVALID_APPWIDGET_ID,
+                )
+                PluginWidgets.handle(context, intent.action, id)
+            }
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_DATE_CHANGED,
+            -> PluginWidgets.refreshAll(context)
+        }
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle,
+    ) {
+        PluginWidgets.refreshId(context, appWidgetId)
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        appWidgetIds.forEach { PluginWidgetBindings.delete(context, it) }
+        PluginWidgets.rescheduleCountdown(context)
+    }
+}
+
+/** 1x1 / 2x1 / 4x1 family. */
+class PluginWidgetSmallProvider : PluginWidgetProvider()
+
+/** 2x2 family. */
+class PluginWidgetMediumProvider : PluginWidgetProvider()
+
+/** 4x2 family. */
+class PluginWidgetLargeProvider : PluginWidgetProvider()
