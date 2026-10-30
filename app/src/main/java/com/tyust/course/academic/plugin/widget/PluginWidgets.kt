@@ -11,6 +11,7 @@ import android.os.Bundle
 import com.tyust.course.academic.plugin.AcademicProviderRegistry
 import com.tyust.course.academic.plugin.PluginManifest
 import com.tyust.course.academic.plugin.PluginPackage
+import com.tyust.course.academic.plugin.PluginPages
 import com.tyust.course.academic.plugin.PluginWidgetContract
 import com.tyust.course.academic.plugin.widgetInvalid
 import com.tyust.course.ui.system.GlassToaster
@@ -61,6 +62,7 @@ object PluginWidgets {
             widgetInvalid("小组件快照总量超过 256 KiB")
         }
         refreshPlugin(context, manifest.id)
+        rescheduleCountdown(context)
         return JSONObject().put("published", true).put("at", at)
     }
 
@@ -80,7 +82,16 @@ object PluginWidgets {
 
     fun handle(context: Context, action: String?, appWidgetId: Int) {
         when (action) {
-            ACTION_REFRESH -> if (appWidgetId > 0) refreshId(context, appWidgetId) else refreshAll(context)
+            ACTION_REFRESH -> {
+                if (appWidgetId > 0) {
+                    refreshId(context, appWidgetId)
+                    PluginWidgetPull.requestForBindings(context, intArrayOf(appWidgetId))
+                } else {
+                    refreshAll(context)
+                    PluginWidgetPull.requestAll(context)
+                }
+                rescheduleCountdown(context)
+            }
             ACTION_CYCLE -> {
                 if (appWidgetId > 0) {
                     val binding = PluginWidgetBindings.read(context, appWidgetId) ?: return
@@ -93,7 +104,15 @@ object PluginWidgets {
         }
     }
 
-    /** Removes snapshots and bindings when the plugin is uninstalled or deactivated. */
+    /** Disabled plugins retain configuration so enabling them restores the same launcher instances. */
+    fun availabilityChanged(context: Context, pluginId: String) {
+        PluginWidgetPullService.cancel(context, pluginId)
+        refreshPlugin(context, pluginId)
+        rescheduleCountdown(context)
+        PluginWidgetPull.requestForBindings(context, PluginWidgetBindings.forPlugin(context, pluginId).map { it.appWidgetId }.toIntArray())
+    }
+
+    /** Removes snapshots and bindings when the plugin is uninstalled. */
     fun clearPlugin(context: Context, pluginId: String) {
         val manager = AppWidgetManager.getInstance(context)
         PluginWidgetBindings.forPlugin(context, pluginId).forEach { binding ->
@@ -117,9 +136,13 @@ object PluginWidgets {
     fun requestPin(context: Context, family: PluginWidgetContract.Family) {
         val manager = AppWidgetManager.getInstance(context) ?: return
         val provider = PluginWidgetRenderer.componentName(context, family)
+        val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            runCatching { manager.isRequestPinAppWidgetSupported }.getOrDefault(false)
+        val callback = if (supported) PluginWidgetPinRequests.callback(context, family) else null
         val pinned = runCatching {
-            manager.isRequestPinAppWidgetSupported && manager.requestPinAppWidget(provider, null, null)
+            callback != null && manager.requestPinAppWidget(provider, null, callback)
         }.getOrDefault(false)
+        if (!pinned && callback != null) PluginWidgetPinRequests.discard(callback)
         if (!pinned) GlassToaster.show("长按桌面，从「小组件」中添加 ${family.label}")
     }
 
@@ -140,7 +163,9 @@ object PluginWidgets {
         )
         val now = System.currentTimeMillis()
         val next = PluginWidgetBindings.all(context).mapNotNull { binding ->
-            WidgetSnapshotStore.read(context, binding.pluginId, binding.widgetId)
+            val pkg = installed(context, binding.pluginId) ?: return@mapNotNull null
+            val declaration = PluginWidgetContract.declaration(pkg.manifest, binding.widgetId) ?: return@mapNotNull null
+            WidgetSnapshotStore.read(context, binding, declaration)
                 ?.payload?.optJSONObject("timer")?.optLong("endAt")?.takeIf { it > now }
         }.minOrNull()
         alarms.cancel(pending)
@@ -168,8 +193,7 @@ object PluginWidgets {
         val declaration = pkg?.let { PluginWidgetContract.declaration(it.manifest, binding.widgetId) }
         val staleAfter = declaration?.staleAfterSeconds ?: PluginWidgetContract.DEFAULT_STALE_SECONDS
         val snapshot = if (declaration == null) null else
-            WidgetSnapshotStore.read(context, binding.pluginId, binding.widgetId)
-                ?.takeIf { it.viewKey.isBlank() || binding.viewKey.isBlank() || it.viewKey == binding.viewKey }
+            WidgetSnapshotStore.read(context, binding, declaration)
         val views = PluginWidgetRenderer.responsive(
             context,
             if (declaration == null) null else pkg,
@@ -182,7 +206,7 @@ object PluginWidgets {
     }
 
     private fun installed(context: Context, pluginId: String): PluginPackage? =
-        runCatching { AcademicProviderRegistry.packages().active(pluginId) }.getOrNull()
+        runCatching { AcademicProviderRegistry.packages().active(pluginId)?.takeIf(PluginPages::available) }.getOrNull()
 
     /** Kept for diagnostics: maps a stored binding back to its declared view keys. */
     internal fun viewKeys(context: Context, appWidgetId: Int): List<String> {

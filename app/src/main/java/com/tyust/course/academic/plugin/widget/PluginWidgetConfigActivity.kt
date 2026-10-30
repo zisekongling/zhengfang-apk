@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tyust.course.academic.plugin.AcademicProviderRegistry
 import com.tyust.course.academic.plugin.PluginPackage
+import com.tyust.course.academic.plugin.PluginPages
 import com.tyust.course.academic.plugin.PluginWidgetContract
 import com.tyust.course.ui.system.*
 import com.tyust.course.ui.theme.CourseSelectorTheme
@@ -41,6 +42,11 @@ class PluginWidgetConfigActivity : ComponentActivity() {
         val manager = AppWidgetManager.getInstance(this)
         val family = familyOf(manager.getAppWidgetInfo(id)?.provider)
         if (id <= 0 || family == null) {
+            finish()
+            return
+        }
+        if (PluginWidgetPinRequests.isCallback(intent) && savedInstanceState == null &&
+            !PluginWidgetPinRequests.consume(this, intent, family)) {
             finish()
             return
         }
@@ -92,7 +98,7 @@ private fun PluginWidgetConfigScreen(activity: Activity, appWidgetId: Int, famil
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) {
             runCatching { AcademicProviderRegistry.packages().list() }.getOrNull().orEmpty()
-                .filter { PluginWidgetContract.declaresWidgets(it.manifest) }
+                .filter { PluginPages.available(it) && PluginWidgetContract.declaresWidgets(it.manifest) }
                 .flatMap { pkg ->
                     PluginWidgetContract.declarations(pkg.manifest)
                         .filter { declaration -> declaration.sizes.any { it in family.sizes } }
@@ -134,9 +140,7 @@ private fun PluginWidgetConfigScreen(activity: Activity, appWidgetId: Int, famil
                     size = family.sizes.firstOrNull { it in declaration.sizes } ?: family.sizes.first(),
                     boundAt = System.currentTimeMillis(),
                 )
-                val snapshot = WidgetSnapshotStore.read(context, binding.pluginId, binding.widgetId)?.takeIf {
-                    it.viewKey.isBlank() || it.viewKey == binding.viewKey
-                } ?: WidgetSnapshotStore.Snapshot(
+                val snapshot = WidgetSnapshotStore.read(context, binding, declaration) ?: WidgetSnapshotStore.Snapshot(
                     pluginId = binding.pluginId,
                     widgetId = binding.widgetId,
                     viewKey = binding.viewKey,
@@ -282,6 +286,7 @@ private fun PluginWidgetConfigScreen(activity: Activity, appWidgetId: Int, famil
                 }
                 val declaration = item.declaration
                 runCatching {
+                    check(PluginPages.available(item.pkg)) { "插件已停用，请重新选择" }
                     PluginWidgetBindings.save(
                         context,
                         PluginWidgetBindings.Binding(

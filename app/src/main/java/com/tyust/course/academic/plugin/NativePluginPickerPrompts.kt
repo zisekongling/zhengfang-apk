@@ -56,6 +56,7 @@ private fun DatePick(prompt: PluginPickerPrompt) {
     GlassDatePickerDialog(
         initialMillis = parseMillis(prompt.input.optString("initial"), DATE_PATTERN) ?: System.currentTimeMillis(),
         title = prompt.title("选择日期"),
+        preserveInitial = true,
         onConfirm = { millis ->
             prompt.result.complete(JSONObject().put("date", formatMillis(millis, DATE_PATTERN)).put("millis", millis))
         },
@@ -70,6 +71,7 @@ private fun TimePick(prompt: PluginPickerPrompt) {
         initialTime = initial,
         title = prompt.title("选择时间"),
         minuteStep = prompt.input.optInt("minuteStep", 5),
+        preserveInitial = true,
         onConfirm = { time -> prompt.result.complete(JSONObject().put("time", time)) },
         onDismiss = { prompt.result.complete(null) }
     )
@@ -80,6 +82,7 @@ private fun DateTimePick(prompt: PluginPickerPrompt) {
     GlassDateTimePickerDialog(
         initialMillis = parseMillis(prompt.input.optString("initial"), DATETIME_PATTERN) ?: System.currentTimeMillis(),
         title = prompt.title("选择时间"),
+        preserveInitial = true,
         onConfirm = { millis ->
             prompt.result.complete(JSONObject().put("datetime", formatMillis(millis, DATETIME_PATTERN)).put("millis", millis))
         },
@@ -94,6 +97,7 @@ private fun TimeRangePick(prompt: PluginPickerPrompt) {
         initialEnd = prompt.input.optString("initialEnd").trim().ifBlank { "08:45" },
         title = prompt.title("编辑节次时间"),
         minuteStep = prompt.input.optInt("minuteStep", 5),
+        preserveInitial = true,
         onConfirm = { start, end -> prompt.result.complete(JSONObject().put("start", start).put("end", end)) },
         onDismiss = { prompt.result.complete(null) }
     )

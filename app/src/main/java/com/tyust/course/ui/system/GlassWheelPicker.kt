@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -169,13 +170,19 @@ fun GlassDatePickerDialog(
     onConfirm: (timeInMillis: Long) -> Unit,
     onDismiss: () -> Unit,
     initialMillis: Long = System.currentTimeMillis(),
-    title: String = "选择日期"
+    title: String = "选择日期",
+    preserveInitial: Boolean = false
 ) {
     val initialCal = remember(initialMillis) {
         Calendar.getInstance().apply { timeInMillis = initialMillis }
     }
     val thisYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val years = remember(thisYear) { (thisYear - 2..thisYear + 1).toList() }
+    val years = remember(thisYear, initialMillis, preserveInitial) {
+        val initialYear = initialCal.get(Calendar.YEAR)
+        val first = if (preserveInitial) minOf(thisYear - 2, initialYear) else thisYear - 2
+        val last = if (preserveInitial) maxOf(thisYear + 1, initialYear) else thisYear + 1
+        (first..last).toList()
+    }
 
     var yearIndex by remember {
         mutableIntStateOf(years.indexOf(initialCal.get(Calendar.YEAR)).coerceAtLeast(0))
@@ -277,26 +284,29 @@ fun GlassDateTimePickerDialog(
     onConfirm: (timeInMillis: Long) -> Unit,
     onDismiss: () -> Unit,
     initialMillis: Long = System.currentTimeMillis(),
-    title: String = "选择时间"
+    title: String = "选择时间",
+    preserveInitial: Boolean = false
 ) {
     val dayCount = 60
-    val baseCalendar = remember {
+    val baseCalendar = remember(initialMillis, preserveInitial) {
         Calendar.getInstance().apply {
-            timeInMillis = System.currentTimeMillis()
+            timeInMillis = if (preserveInitial) initialMillis else System.currentTimeMillis()
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
+            if (preserveInitial) add(Calendar.DAY_OF_YEAR, -dayCount / 2)
         }
     }
     val dayLabels = remember(baseCalendar) {
         val fmt = SimpleDateFormat("M月d日 E", Locale.CHINA)
         (0 until dayCount).map { offset ->
-            if (offset == 0) {
+            val cal = baseCalendar.clone() as Calendar
+            cal.add(Calendar.DAY_OF_YEAR, offset)
+            val today = Calendar.getInstance()
+            if (cal.get(Calendar.YEAR) == today.get(Calendar.YEAR) && cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)) {
                 "今天"
             } else {
-                val cal = baseCalendar.clone() as Calendar
-                cal.add(Calendar.DAY_OF_YEAR, offset)
                 fmt.format(cal.time)
             }
         }
@@ -308,8 +318,8 @@ fun GlassDateTimePickerDialog(
         Calendar.getInstance().apply { timeInMillis = initialMillis }
     }
     val initialDayOffset = remember(initialCal) {
-        val diff = ((initialCal.timeInMillis - baseCalendar.timeInMillis) /
-            (24L * 60L * 60L * 1000L)).toInt()
+        // Calendar days are not always 24 hours across daylight-saving transitions.
+        val diff = calendarDayOffset(baseCalendar, initialCal)
         diff.coerceIn(0, dayCount - 1)
     }
 
@@ -409,11 +419,15 @@ fun GlassTimePickerDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
     title: String = "选择时间",
-    minuteStep: Int = 5
+    minuteStep: Int = 5,
+    preserveInitial: Boolean = false
 ) {
     val step = minuteStep.coerceIn(1, 30)
     val hourLabels = remember { (0..23).map { "%02d".format(it) } }
-    val minuteValues = remember(step) { (0 until 60 step step).toList() }
+    val minuteValues = remember(step, initialTime, preserveInitial) {
+        val values = (0 until 60 step step).toList()
+        if (preserveInitial) (values + parseMinute(initialTime, 0)).distinct().sorted() else values
+    }
     val minuteLabels = remember(minuteValues) { minuteValues.map { "%02d".format(it) } }
 
     var hour by remember { mutableIntStateOf(parseHour(initialTime, 8)) }
@@ -502,10 +516,15 @@ fun GlassTimeRangePickerDialog(
     onConfirm: (start: String, end: String) -> Unit,
     onDismiss: () -> Unit,
     title: String = "编辑节次时间",
-    minuteStep: Int = 5
+    minuteStep: Int = 5,
+    preserveInitial: Boolean = false
 ) {
     val hourLabels = remember { (0..23).map { "%02d".format(it) } }
-    val minuteValues = remember(minuteStep) { (0 until 60 step minuteStep).toList() }
+    val step = minuteStep.coerceIn(1, 30)
+    val minuteValues = remember(step, initialStart, initialEnd, preserveInitial) {
+        val values = (0 until 60 step step).toList()
+        if (preserveInitial) (values + parseMinute(initialStart, 0) + parseMinute(initialEnd, 45)).distinct().sorted() else values
+    }
     val minuteLabels = remember(minuteValues) { minuteValues.map { "%02d".format(it) } }
 
     var startHour by remember { mutableIntStateOf(parseHour(initialStart, 8)) }
@@ -666,6 +685,16 @@ fun GlassOptionWheelDialog(
             )
         }
     }
+}
+
+private fun calendarDayOffset(base: Calendar, selected: Calendar): Int {
+    // Compare date fields at UTC midnight, keeping API 24 compatibility and avoiding DST fractions.
+    fun midnight(calendar: Calendar): Long = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(Calendar.ERA, calendar.get(Calendar.ERA))
+        set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+    return ((midnight(selected) - midnight(base)) / (24L * 60 * 60 * 1000)).toInt()
 }
 
 private fun parseHour(value: String, fallback: Int): Int =    value.substringBefore(':').trim().toIntOrNull()?.coerceIn(0, 23) ?: fallback

@@ -116,7 +116,7 @@ object PluginWidgetRenderer {
         applyTextScale(view, family, widthDp)
 
         if (pkg == null) {
-            empty(view, "插件已移除", "轻触打开插件中心")
+            empty(view, "插件已移除或停用", "轻触打开插件中心")
             view.setOnClickPendingIntent(R.id.plugin_widget_surface,
                 PendingIntent.getActivity(context, binding.appWidgetId * 10 + 1,
                     Intent(context, PluginCenterActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -280,7 +280,8 @@ object PluginWidgetRenderer {
         }
         val pad = dp(context, 5)
         visible(view, R.id.plugin_widget_grid_row_1, rows.isNotEmpty())
-        visible(view, R.id.plugin_widget_grid_row_2, rows.size > 3)
+        val columns = if (narrow || compact) 2 else 3
+        visible(view, R.id.plugin_widget_grid_row_2, cells > columns && rows.size > columns)
         // The layout is a fixed 3-column table; at 2x2 / 1x1 width the third column has no room,
         // so paint two columns and leave cell_3 / cell_6 hidden.
         val ids = if (narrow) intArrayOf(

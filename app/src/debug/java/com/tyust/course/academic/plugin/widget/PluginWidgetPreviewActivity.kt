@@ -42,7 +42,10 @@ class PluginWidgetPreviewActivity : Activity() {
         for (theme in listOf("light", "dark")) {
             root.addView(label("主题：$theme", 15f, true))
             for (declaration in declarations) {
-                val snapshot = WidgetSnapshotStore.read(this, pkg.manifest.id, declaration.id)
+                val instance = PluginWidgetBindings.forPlugin(this, pkg.manifest.id).firstOrNull { it.widgetId == declaration.id }
+                val snapshot = if (declaration.push) {
+                    WidgetSnapshotStore.read(this, pkg.manifest.id, declaration.id, declaration.viewKey(null))
+                } else instance?.let { WidgetSnapshotStore.read(this, it, declaration) }
                 root.addView(label(
                     "${declaration.id} · ${declaration.template} · ${declaration.sizes.joinToString()} · " +
                         if (snapshot == null) "无快照" else "快照 ${snapshot.updatedAt}",

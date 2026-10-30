@@ -5,6 +5,8 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import com.tyust.course.academic.plugin.AcademicProviderRegistry
+import com.tyust.course.academic.plugin.PluginWidgetContract
 
 /**
  * Base provider for plugin widgets.
@@ -57,7 +59,12 @@ abstract class PluginWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        val plugins = appWidgetIds.toList().mapNotNull { PluginWidgetBindings.read(context, it)?.pluginId }.distinct()
         appWidgetIds.forEach { PluginWidgetBindings.delete(context, it) }
+        plugins.filter { id -> PluginWidgetBindings.forPlugin(context, id).none { binding ->
+            val pkg = AcademicProviderRegistry.packages().active(id)
+            pkg?.let { PluginWidgetContract.declaration(it.manifest, binding.widgetId)?.push == false } == true
+        } }.forEach { PluginWidgetPullService.cancel(context, it) }
         PluginWidgets.rescheduleCountdown(context)
     }
 }

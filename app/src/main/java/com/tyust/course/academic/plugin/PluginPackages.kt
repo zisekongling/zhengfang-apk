@@ -95,6 +95,8 @@ class PluginPackageStore(private val context: Context, private val trustedKeys: 
     // All stores in the host process must serialize the shared AtomicFile transaction.
     private val lock get() = storeLock
 
+    init { PluginSettings.observeWidgetAvailability(context) }
+
     suspend fun install(bytes: ByteArray, allowDevelopment: Boolean = false, stageOnly: Boolean = false): PluginPackage = withContext(Dispatchers.IO) {
         val candidate = PluginPackageVerifier.read(bytes, schema, trustedKeys, allowDevelopment)
         PluginPlatformContract.requireCompatible(candidate.manifest, com.tyust.course.BuildConfig.VERSION_CODE, PluginPages.capabilities())

@@ -6,6 +6,7 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.os.PersistableBundle
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -71,8 +72,10 @@ class PluginWidgetPullService : JobService() {
 
         fun schedule(context: Context, pluginId: String) {
             val scheduler = scheduler(context) ?: return
-            if (scheduler.getPendingJob(periodicId(pluginId)) != null) return
+            // Repair persisted jobs created before the plugin identity was included.
+            if (scheduler.getPendingJob(periodicId(pluginId))?.extras?.getString(EXTRA_PLUGIN_ID) == pluginId) return
             val info = JobInfo.Builder(periodicId(pluginId), ComponentName(context, PluginWidgetPullService::class.java))
+                .setExtras(PersistableBundle().apply { putString(EXTRA_PLUGIN_ID, pluginId) })
                 .setPeriodic(PERIODIC_MS, FLEX_MS)
                 .setPersisted(true)
                 .build()
@@ -86,6 +89,7 @@ class PluginWidgetPullService : JobService() {
             val scheduler = scheduler(context) ?: return
             runCatching { scheduler.cancel(immediateId(pluginId)) }
             val info = JobInfo.Builder(immediateId(pluginId), ComponentName(context, PluginWidgetPullService::class.java))
+                .setExtras(PersistableBundle().apply { putString(EXTRA_PLUGIN_ID, pluginId) })
                 .setMinimumLatency(0)
                 .build()
             runCatching { scheduler.schedule(info) }

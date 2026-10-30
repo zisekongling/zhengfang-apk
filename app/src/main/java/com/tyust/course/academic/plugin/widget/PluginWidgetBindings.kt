@@ -69,6 +69,7 @@ object PluginWidgetBindings {
     }
 
     fun delete(context: Context, appWidgetId: Int) {
+        read(context, appWidgetId)?.let { WidgetSnapshotStore.clearInstance(context, it) }
         prefs(context).edit().remove(appWidgetId.toString()).apply()
     }
 

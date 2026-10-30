@@ -70,12 +70,11 @@ internal object PluginWidgetPull {
     /** Called from launcher broadcasts; only enqueues work, never touches the plugin runtime. */
     fun requestForBindings(context: Context, appWidgetIds: IntArray) {
         if (appWidgetIds.isEmpty()) return
-        val pluginIds = appWidgetIds.toList().mapNotNull { PluginWidgetBindings.read(context, it)?.pluginId }.distinct()
-        pluginIds.forEach { pluginId ->
-            val pkg = AcademicProviderRegistry.packages().active(pluginId) ?: return@forEach
-            if (PluginWidgetContract.declarations(pkg.manifest).any { !it.push })
-                PluginWidgetPullService.requestImmediate(context, pluginId)
-        }
+        appWidgetIds.toList().mapNotNull { PluginWidgetBindings.read(context, it) }.mapNotNull { binding ->
+            val pkg = AcademicProviderRegistry.packages().active(binding.pluginId) ?: return@mapNotNull null
+            if (!PluginPages.available(pkg)) return@mapNotNull null
+            binding.pluginId.takeIf { PluginWidgetContract.declaration(pkg.manifest, binding.widgetId)?.push == false }
+        }.distinct().forEach { PluginWidgetPullService.requestImmediate(context, it) }
     }
 
     /** Boot/time changes: every bound widget may need a fresh pull. */
@@ -157,8 +156,7 @@ internal object PluginWidgetPull {
             val now = System.currentTimeMillis()
             val raw = snapshotFromItems(declaration, result.optJSONArray("items") ?: JSONArray(), now)
             val snapshot = PluginWidgetContract.sanitize(declaration, raw, now)
-            WidgetSnapshotStore.save(app, pkg.manifest.id, binding.widgetId, viewKey, snapshot, now)
-            PluginWidgets.refreshId(app, binding.appWidgetId)
+            storeResult(app, binding, declaration, snapshot, now, active)
         } finally {
             host.close()
         }
@@ -173,7 +171,7 @@ internal object PluginWidgetPull {
     }
 
     /** `options` is the declared instance configuration with defaults filled in. */
-    private fun options(
+    internal fun options(
         binding: PluginWidgetBindings.Binding,
         declaration: PluginWidgetContract.Declaration,
     ): JSONArray {
@@ -183,5 +181,17 @@ internal object PluginWidgetPull {
             if (value != null && value != JSONObject.NULL) array.put(JSONObject().put("id", option.id).put("value", value))
         }
         return array
+    }
+
+    /** An awaited query must not revive a deleted, reconfigured or disabled widget. */
+    internal fun storeResult(app: Context, binding: PluginWidgetBindings.Binding,
+                             declaration: PluginWidgetContract.Declaration, snapshot: JSONObject,
+                             now: Long, active: () -> Boolean) {
+        if (!active()) return
+        val current = PluginWidgetBindings.read(app, binding.appWidgetId) ?: return
+        if (WidgetSnapshotStore.configuration(current, declaration) != WidgetSnapshotStore.configuration(binding, declaration)) return
+        WidgetSnapshotStore.savePull(app, binding, declaration, snapshot, now)
+        PluginWidgets.refreshId(app, binding.appWidgetId)
+        PluginWidgets.rescheduleCountdown(app)
     }
 }
