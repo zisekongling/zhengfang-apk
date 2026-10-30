@@ -1,5 +1,22 @@
 package com.tyust.course.academic
 
+/** Content-derived protocol UI ids must never become backend association ids. */
+internal fun examSourceIdentity(id: String, name: String, time: String, examName: String): String {
+    if (id.startsWith("content:")) return ""
+    // Recognize exact pre-fix bundled rowKey values when restoring saved overrides.
+    fun legacyKey(parts: List<String>): String {
+        var hash = 2166136261L.toInt()
+        val text = parts.joinToString("\u0000")
+        var index = 0
+        while (index < text.length) {
+            hash = (hash xor text[index].code) * 16777619
+            index += if (Character.isHighSurrogate(text[index]) && index + 1 < text.length && Character.isLowSurrogate(text[index + 1])) 2 else 1
+        }
+        return Integer.toUnsignedString(hash, 16) + ":" + parts.filter(String::isNotEmpty).joinToString("|").take(96)
+    }
+    return id.takeUnless { it == legacyKey(listOf(name, time)) || it == legacyKey(listOf(name, time, examName)) }.orEmpty()
+}
+
 data class AcademicTerm(
     val id: String, val name: String = id,
     val year: Int = id.takeIf { STANDARD.matches(it) }?.substringBefore('-')?.toIntOrNull() ?: 0,
@@ -43,7 +60,7 @@ data class AcademicGradeReport(
 
 data class AcademicExam(
     val name: String, val time: String, val location: String,
-    val seat: String = "", val examName: String = "", val teacher: String = ""
+    val seat: String = "", val examName: String = "", val teacher: String = "", val sourceId: String = ""
 )
 
 interface AcademicStudyAdapter {

@@ -91,6 +91,10 @@ public class UserManager {
         hebic.academicSystem = "auto";
         hebic.basePath = "";
         defaultSchools.add(hebic);
+        for (com.tyust.course.academic.AcademicSchoolProfiles.Profile profile :
+                com.tyust.course.academic.AcademicSchoolProfiles.INSTANCE.getProfiles()) {
+            if (profile.getId().equals("ahut")) defaultSchools.add(profile.school());
+        }
         // 重要修复：这里不要直接赋值 currentSchool，等待 init() 时从 SharedPreferences 加载
     }
 
@@ -476,6 +480,7 @@ public class UserManager {
         if (appContext != null) {
             com.tyust.course.schedule.ScheduleReminderScheduler.get(appContext).clearAccount(storageKey);
             GradeBrowsePreferences.from(appContext).removeAccount(storageKey);
+            com.tyust.course.study.AcademicSnapshotStore.from(appContext, sessionState).removeAccount(storageKey);
         }
 
         List<AccountRecord> records = loadAccountRecords();
