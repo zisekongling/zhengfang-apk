@@ -87,6 +87,35 @@ class ExamRecordsTest {
         assertEquals(3, ExamRecords.merge(listOf(fresh, fresh.copy(id = "other")), listOf(restored)).size)
     }
 
+    @Test fun legacyGeneratedIdentitySurvivesEditsToTimeNameAndTypeUsingTheOriginalAssociation() {
+        val original = ExamItemUi("Math", "2026-12-01 08:00", "A", "", "final", "")
+        val automatic = ExamRecord.automatic(term, original, "6fceee05:Math|2026-12-01 08:00|final")
+        val changes = listOf(original.copy(examTime = "2026-12-02 09:00"), original.copy(courseName = "My Math"),
+            original.copy(examName = "My exam"), original.copy(courseName = "My Math", examTime = "2026-12-02 09:00", examName = "My exam"))
+        for (edit in changes) {
+            val json = automatic.overrideWith(edit).toJson().apply { remove("associationKey") }
+            val restored = ExamRecord.fromJson(json)
+            assertEquals("", restored.sourceId)
+            assertEquals(edit.courseName, restored.exam.courseName)
+            assertEquals(edit.examTime, restored.exam.examTime)
+            assertEquals(edit.examName, restored.exam.examName)
+            val fresh = ExamRecord.automatic(term, original.copy(examTime = "2026-12-03 11:00"))
+            assertEquals(listOf(restored), ExamRecords.merge(listOf(fresh), listOf(restored)))
+            val ambiguous = ExamRecords.merge(listOf(fresh, fresh.copy(id = "second")), listOf(restored))
+            assertEquals(3, ambiguous.size); assertTrue(ambiguous.first().needsRelink)
+        }
+    }
+
+    @Test fun opaqueOrUnverifiableLegacyLookingBackendIdentitiesArePreserved() {
+        val original = ExamItemUi("Math", "2026-12-01 08:00", "A", "", "final", "")
+        for (source in listOf("backend:42|exam", "deadbeef:Math|2026-12-01 08:00|final", "6fceee05:Math|2026-12-01 08:00|final-truncated")) {
+            val old = ExamRecord.automatic(term, original, source)
+            val restored = ExamRecord.fromJson(old.overrideWith(original.copy(courseName = "My Math", examTime = "2027-01-01", examName = "My exam")).toJson().apply { remove("associationKey") })
+            assertEquals(source, restored.sourceId)
+            assertEquals(1, ExamRecords.merge(listOf(old), listOf(restored)).size)
+        }
+    }
+
     @Test fun duplicateBackendIdsRefineOriginalContentWithoutUsingResponseOrder() {
         val a = automatic().exam.copy(sourceId = "duplicate", location = "A", examName = "期末")
         val b = a.copy(location = "B", examName = "补考")

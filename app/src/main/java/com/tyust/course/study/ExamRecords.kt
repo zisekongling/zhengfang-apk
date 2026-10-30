@@ -34,12 +34,21 @@ data class ExamRecord(
         fun manual(term: String, exam: ExamItemUi) = ExamRecord(UUID.randomUUID().toString(), term, exam, true)
         fun fromJson(json: JSONObject): ExamRecord {
             val exam = json.getJSONObject("exam")
+            val term = json.getString("term")
+            val matchKey = json.optString("matchKey")
+            var sourceId = com.tyust.course.academic.examSourceIdentity(json.optString("sourceId"),
+                exam.getString("courseName"), exam.getString("examTime"), exam.optString("examName"))
+            if (json.getBoolean("manual") && json.optString("overridesId").isNotBlank() && matchKey.matches(Regex("[0-9a-f]{64}"))) {
+                val original = com.tyust.course.academic.legacyExamSourceParts(sourceId)
+                // JSON keys contain the original type too. HTML keys omit it, but still verify
+                // their original content hash. Never infer an identity from an ordinal or prefix.
+                if (original != null && (original.size == 2 ||
+                    matchKey == hash(listOf(term, normalized(original[0]), normalized(original[2]))))) sourceId = ""
+            }
             return ExamRecord(json.getString("id"), json.getString("term"),
                 ExamItemUi(exam.getString("courseName"), exam.getString("examTime"), exam.optString("location"),
                     exam.optString("seatNumber"), exam.optString("examName"), exam.optString("teacher")),
-                json.getBoolean("manual"), com.tyust.course.academic.examSourceIdentity(json.optString("sourceId"),
-                    exam.getString("courseName"), exam.getString("examTime"), exam.optString("examName")),
-                json.optString("overridesId"), json.optString("matchKey"),
+                json.getBoolean("manual"), sourceId, json.optString("overridesId"), matchKey,
                 associationKey = json.optString("associationKey"))
         }
     }
