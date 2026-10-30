@@ -42,7 +42,7 @@ object PluginWidgets {
         .put("sizes", JSONArray(PluginWidgetContract.SIZES.sorted()))
 
     /** `widget.publish@1`: validate, persist and refresh every bound instance of the plugin. */
-    fun publish(context: Context, manifest: PluginManifest, input: JSONObject): JSONObject {
+    fun publish(context: Context, manifest: PluginManifest, input: JSONObject, provenance: String = ""): JSONObject {
         val widgetId = input.optString("widgetId")
         if (!PluginWidgetContract.declaresWidgets(manifest)) {
             widgetInvalid("插件未声明小组件")
@@ -56,7 +56,7 @@ object PluginWidgets {
         val clean = PluginWidgetContract.sanitize(declaration, snapshot)
         PluginWidgetContract.validateActions(manifest, clean)
         val at = System.currentTimeMillis()
-        WidgetSnapshotStore.save(context, manifest.id, widgetId, viewKey, clean, at)
+        WidgetSnapshotStore.save(context, manifest.id, widgetId, viewKey, clean, at, provenance)
         if (WidgetSnapshotStore.totalBytes(context, manifest.id) > PluginWidgetContract.MAX_PLUGIN_BYTES) {
             WidgetSnapshotStore.clearWidget(context, manifest.id, widgetId)
             widgetInvalid("小组件快照总量超过 256 KiB")
@@ -69,6 +69,13 @@ object PluginWidgets {
     fun refreshAll(context: Context) {
         refreshIds(context, PluginWidgetBindings.all(context).map { it.appWidgetId }.toIntArray())
         rescheduleCountdown(context)
+    }
+
+    /** Account changes retire persisted data and the already rendered launcher view. */
+    fun academicAccountChanged(context: Context) {
+        WidgetSnapshotStore.clearAcademic(context)
+        // Login restoration can precede registry initialization at process startup.
+        runCatching { refreshAll(context); PluginWidgetPull.requestAll(context) }
     }
 
     fun refreshPlugin(context: Context, pluginId: String) {

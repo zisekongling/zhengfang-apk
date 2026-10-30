@@ -481,6 +481,7 @@ public class UserManager {
             com.tyust.course.schedule.ScheduleReminderScheduler.get(appContext).clearAccount(storageKey);
             GradeBrowsePreferences.from(appContext).removeAccount(storageKey);
             com.tyust.course.study.AcademicSnapshotStore.from(appContext, sessionState).removeAccount(storageKey);
+            com.tyust.course.academic.plugin.widget.PluginWidgets.INSTANCE.academicAccountChanged(appContext);
         }
 
         List<AccountRecord> records = loadAccountRecords();
@@ -820,6 +821,7 @@ public class UserManager {
             runtimeSchoolAddress = address;
             runtimeSchool = currentSchool;
             sessionState.replace(account);
+            if (appContext != null) com.tyust.course.academic.plugin.widget.PluginWidgets.INSTANCE.academicAccountChanged(appContext);
             if (accountChanged) SmartSelector.getInstance().reloadForCurrentAccount();
         } catch (Exception e) {
             Log.w(TAG, "刷新账号运行态失败: " + e.getMessage());
@@ -845,6 +847,7 @@ public class UserManager {
         runtimeSchoolAddress = "";
         runtimeSchool = null;
         sessionState.replace("default");
+        if (appContext != null) com.tyust.course.academic.plugin.widget.PluginWidgets.INSTANCE.academicAccountChanged(appContext);
         isLoggedIn = false;
         isDemoMode = false;
         studentName = "";

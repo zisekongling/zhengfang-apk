@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.tyust.course.academic.AcademicSession
 import com.tyust.course.academic.plugin.widget.PluginWidgets
+import com.tyust.course.academic.plugin.widget.WidgetSnapshotScope
 import kotlinx.coroutines.*
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -53,6 +54,7 @@ class NativeCapabilityHost internal constructor(
     private val foregroundGrant: NativeForegroundGrant? = null, private val active: () -> Boolean
 ) {
     private val dataGuard = PluginDataGuard(app, pkg)
+    private val widgetProvenance = WidgetSnapshotScope.forSession(app, pkg, session).identity
     val namespace = PluginStorageScope.session(session, pkg.manifest.id, !pkg.official)
     private val legacyNamespaces = PluginLegacyData.namespaces(app, pkg, session)
     init { (legacyNamespaces + namespace).forEach { PluginServiceAccounts(app).trackScope(pkg.manifest.id, it) } }
@@ -347,7 +349,7 @@ class NativeCapabilityHost internal constructor(
                 "data.query" -> NativePluginRunner.invoke(app, pkg, session, "data.query", input, JSONObject().put("capabilities", capabilities()), active = active)
                 // Widgets never run plugin code: publish stores a bounded snapshot, render only lists what the host offers.
                 "widget.render" -> PluginWidgets.renderResult()
-                "widget.publish" -> PluginWidgets.publish(app, pkg.manifest, input)
+                "widget.publish" -> PluginWidgets.publish(app, pkg.manifest, input, widgetProvenance)
                 else -> throw PluginException(PluginErrorCode.UNSUPPORTED, "未实现的宿主能力")
             }
         }

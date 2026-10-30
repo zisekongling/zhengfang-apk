@@ -109,6 +109,18 @@ class PluginPickerContractTest {
         }
     }
 
+    @Test fun preEpochInitialConfirmationPassesFinalHostOutputValidation() = runBlocking {
+        for ((name, input, picked) in listOf(
+            Triple("ui.date.pick", "1969-12-31", JSONObject().put("date", "1969-12-31").put("millis", -115200000L)),
+            Triple("ui.datetime.pick", "1969-12-31 12:00", JSONObject().put("datetime", "1969-12-31 12:00").put("millis", -72000000L))
+        )) {
+            val interaction = FakePicker(picked)
+            val result = host(interaction).execute(effect(name, JSONObject().put("initial", input)), NativeFlow(true)) as JSONObject
+            assertTrue(result.getLong("millis") < 0)
+            assertTrue(interaction.seen!!.second.getString("initial") == input)
+        }
+    }
+
     @Test fun pickersNeedForegroundNativePage() {
         assertThrows(PluginException::class.java) {
             runBlocking {

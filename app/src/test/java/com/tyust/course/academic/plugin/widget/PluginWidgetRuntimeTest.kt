@@ -64,20 +64,33 @@ class PluginWidgetRuntimeTest {
         pkg = install()
     }
 
-    private fun install(): PluginPackage = runBlocking {
-        val manifest = JSONObject("""{"id":"test.widget-runtime","name":"Synthetic widget","version":"1.0.0","apiVersion":3,
-          "kind":"widget","entry":"index.js","minAppVersionCode":130,"permissions":["widget","runtime"],"capabilities":["data.query"],
+    private fun install(server: Boolean = false, academic: Boolean = false): PluginPackage = runBlocking {
+        // These are fresh fixture profiles. SDK AtomicFile.renameTo cannot replace its index
+        // on Windows/Robolectric; package-update behavior is covered by the package-store tests.
+        if (server || academic) listOf("index.json", "index.json.new", "index.json.bak").forEach {
+            File(app.filesDir, "academic-plugins/$it").delete()
+        }
+        val pluginId = "test.widget-runtime" + when { academic -> "-academic"; server -> "-service"; else -> "" }
+        val manifest = JSONObject("""{"id":"$pluginId","name":"Synthetic widget","version":"1.0.0","apiVersion":3,
+          "kind":"widget","category":"productivity","entry":"index.js","minAppVersionCode":130,"permissions":["widget","runtime"],"capabilities":["data.query"],
           "requires":[{"name":"widget.render","version":1},{"name":"widget.publish","version":1},{"name":"data.query","version":1}],
           "network":[],"files":{"index.js":"${PluginJson.sha256(byteArrayOf())}"},"contributes":{"pages":[],"entries":[],
-          "dataProviders":[{"id":"test.widget-runtime.data","title":"Synthetic"}],"widgets":[
+          "dataProviders":[{"id":"$pluginId.data","title":"Synthetic"}],"widgets":[
           {"id":"push","title":"Push","sizes":["2x2"],"template":"countdown","defaultView":"a","views":[{"key":"a","title":"A"},{"key":"b","title":"B"}],"refresh":{"mode":"push"}},
-          {"id":"pull","title":"Pull","sizes":["2x2"],"template":"text","views":[{"key":"a","title":"A"}],"options":[{"id":"count","title":"Count","type":"number","default":2,"scope":"instance"}],"refresh":{"mode":"pull","providerId":"test.widget-runtime.data"}}]}}""")
+          {"id":"pull","title":"Pull","sizes":["2x2"],"template":"text","views":[{"key":"a","title":"A"}],"options":[{"id":"count","title":"Count","type":"number","default":2,"scope":"instance"}],"refresh":{"mode":"pull","providerId":"$pluginId.data"}}]}}""")
+        if (server) manifest.put("servers", JSONArray().put(JSONObject().put("id", "site").put("title", "Site").put("origin", "https://site.test").put("authentication", "web")))
+        if (academic) manifest.remove("servers") // Historical native plugins retain their academic account scope.
+        if (academic) { manifest.put("kind", "native"); manifest.remove("category") }
         val archive = ByteArrayOutputStream().also { output -> ZipOutputStream(output).use { zip ->
             listOf("manifest.json" to manifest.toString().toByteArray(), "index.js" to byteArrayOf()).forEach { (name, bytes) ->
                 zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry()
             }
         } }.toByteArray()
-        AcademicProviderRegistry.packages().install(archive, true).also { AcademicProviderRegistry.reload() }
+        val store = AcademicProviderRegistry.packages()
+        val candidate = store.install(archive, true)
+        assertEquals("Synthetic fixture must be active before cache assertions", candidate.digest, store.active(candidate.manifest.id)?.digest)
+        AcademicProviderRegistry.reload()
+        candidate
     }
 
     private fun binding(widget: String = "push", view: String = "a", template: String = "countdown"): PluginWidgetBindings.Binding {
@@ -172,6 +185,64 @@ class PluginWidgetRuntimeTest {
         PluginWidgets.refreshAll(app)
         assertEquals("Alpha", shadowOf(manager).getViewFor(a.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.toString())
         assertEquals("Beta", shadowOf(manager).getViewFor(b.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.toString())
+    }
+
+    @Test fun selectedServiceAccountInvalidatesPullAndPushBeforeAnySuccessfulRefresh() {
+        pkg = install(server = true)
+        val pull = binding("pull", template = "text")
+        val push = binding(template = "text")
+        val accounts = PluginServiceAccounts(app)
+        accounts.select(pkg, "site", "A")
+        val declaration = PluginWidgetContract.declaration(pkg.manifest, "pull")!!
+        WidgetSnapshotStore.savePull(app, pull, declaration, payload("Account A"))
+        publish("a", "Account A")
+        assertNotNull(WidgetSnapshotStore.read(app, pull, declaration))
+        accounts.select(pkg, "site", "B")
+        assertNull(WidgetSnapshotStore.read(app, pull, declaration))
+        assertNull(WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey))
+        assertFalse(shadowOf(manager).getViewFor(push.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.toString().contains("Account A"))
+    }
+
+    @Test fun removedServiceAccountAndLateCapturedPushCannotReviveSnapshots() {
+        pkg = install(server = true)
+        val accounts = PluginServiceAccounts(app)
+        val account = accounts.select(pkg, "site", "A")
+        val session = accounts.session(pkg, "site")
+        val provenance = WidgetSnapshotScope.forSession(app, pkg, session).identity
+        val push = binding(template = "text")
+        publish("a", "Private")
+        accounts.remove(pkg, "site", account)
+        assertNull(WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey))
+        assertThrows(PluginException::class.java) {
+            WidgetSnapshotStore.save(app, push.pluginId, push.widgetId, push.viewKey, payload("Late A"), provenance = provenance)
+        }
+        assertNull(WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey))
+    }
+
+    @Test fun academicAccountGenerationInvalidatesPullPushAndUnownedLegacyPush() {
+        pkg = install(academic = true)
+        assertEquals(pkg.digest, AcademicProviderRegistry.packages().active(pkg.manifest.id)!!.digest)
+        assertTrue("Fresh native profile must retain academic account scope", PluginLegacyData.retainsAccountScope(app, pkg))
+        val sessions = UserManager.getInstance().sessionState
+        sessions.replace("academic-a")
+        val pull = binding("pull", template = "text")
+        val push = binding(template = "text")
+        val declaration = PluginWidgetContract.declaration(pkg.manifest, "pull")!!
+        WidgetSnapshotStore.savePull(app, pull, declaration, payload("A"))
+        publish("a", "A")
+        sessions.replace("academic-b")
+        assertNull(WidgetSnapshotStore.read(app, pull, declaration))
+        assertNull(WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey))
+        val old = legacy(push, "Unknown account")
+        assertNull(WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey))
+        assertFalse(old.exists())
+    }
+
+    @Test fun explicitlyPluginWideSnapshotsSurviveUnrelatedAcademicAccountChanges() {
+        val push = binding(template = "text")
+        publish("a", "Plugin display")
+        UserManager.getInstance().sessionState.replace("unrelated-account")
+        assertEquals("Plugin display", WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey)!!.payload.getJSONObject("header").getString("title"))
     }
 
     @Test fun refreshBroadcastEnqueuesPullForOnlyTheBoundDeclaration() {

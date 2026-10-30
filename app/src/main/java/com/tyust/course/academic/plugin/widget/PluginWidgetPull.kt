@@ -99,6 +99,7 @@ internal object PluginWidgetPull {
         PluginWidgetPullService.schedule(app, pluginId)
         val accounts = PluginServiceAccounts(app)
         val session = session(app, pkg, accounts)
+        val provenance = WidgetSnapshotScope.forSession(app, pkg, session).identity
         val user = UserManager.getInstance()
         val token = user.sessionState.token
         val job = currentCoroutineContext()[kotlinx.coroutines.Job]
@@ -113,7 +114,7 @@ internal object PluginWidgetPull {
             withTimeout(TIMEOUT_MS) {
                 for (binding in instances) {
                     try {
-                        pullOne(app, pkg, session, binding, ::active)
+                        pullOne(app, pkg, session, binding, provenance, ::active)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (t: Throwable) {
@@ -131,6 +132,7 @@ internal object PluginWidgetPull {
         pkg: PluginPackage,
         session: AcademicSession,
         binding: PluginWidgetBindings.Binding,
+        provenance: String,
         active: () -> Boolean,
     ) {
         val declaration = PluginWidgetContract.declaration(pkg.manifest, binding.widgetId) ?: return
@@ -156,7 +158,7 @@ internal object PluginWidgetPull {
             val now = System.currentTimeMillis()
             val raw = snapshotFromItems(declaration, result.optJSONArray("items") ?: JSONArray(), now)
             val snapshot = PluginWidgetContract.sanitize(declaration, raw, now)
-            storeResult(app, binding, declaration, snapshot, now, active)
+            storeResult(app, binding, declaration, snapshot, now, provenance, active)
         } finally {
             host.close()
         }
@@ -186,11 +188,11 @@ internal object PluginWidgetPull {
     /** An awaited query must not revive a deleted, reconfigured or disabled widget. */
     internal fun storeResult(app: Context, binding: PluginWidgetBindings.Binding,
                              declaration: PluginWidgetContract.Declaration, snapshot: JSONObject,
-                             now: Long, active: () -> Boolean) {
+                             now: Long, provenance: String = "", active: () -> Boolean) {
         if (!active()) return
         val current = PluginWidgetBindings.read(app, binding.appWidgetId) ?: return
         if (WidgetSnapshotStore.configuration(current, declaration) != WidgetSnapshotStore.configuration(binding, declaration)) return
-        WidgetSnapshotStore.savePull(app, binding, declaration, snapshot, now)
+        WidgetSnapshotStore.savePull(app, binding, declaration, snapshot, now, provenance)
         PluginWidgets.refreshId(app, binding.appWidgetId)
         PluginWidgets.rescheduleCountdown(app)
     }
