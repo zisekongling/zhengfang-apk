@@ -1,4 +1,4 @@
-﻿package com.tyust.course.ui.system
+package com.tyust.course.ui.system
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -390,6 +390,96 @@ fun GlassDateTimePickerDialog(
                     selectedIndex = minuteIndex,
                     onSelect = { minuteIndex = it },
                     modifier = Modifier.weight(0.7f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 玻璃滚轮时间选择弹窗：时 : 分 两列，与「节次时间」共用同一套滚轮和弹窗样式。
+ * 分钟按 [minuteStep] 步进（默认 5），与 [GlassTimeRangePickerDialog] 一致。
+ *
+ * @param initialTime "HH:mm" 形式的初始时间，格式不对时回落到 08:00
+ * @param onConfirm 回调 "HH:mm" 形式的时间
+ */
+@Composable
+fun GlassTimePickerDialog(
+    initialTime: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+    title: String = "选择时间",
+    minuteStep: Int = 5
+) {
+    val step = minuteStep.coerceIn(1, 30)
+    val hourLabels = remember { (0..23).map { "%02d".format(it) } }
+    val minuteValues = remember(step) { (0 until 60 step step).toList() }
+    val minuteLabels = remember(minuteValues) { minuteValues.map { "%02d".format(it) } }
+
+    var hour by remember { mutableIntStateOf(parseHour(initialTime, 8)) }
+    var minute by remember {
+        mutableIntStateOf(nearestMinuteIndex(parseMinute(initialTime, 0), minuteValues))
+    }
+
+    SystemDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        dismissButton = {
+            SystemSecondaryButton(
+                text = "取消",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            SystemPrimaryButton(
+                text = "确定",
+                onClick = { onConfirm("%02d:%02d".format(hour, minuteValues[minute])) },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // 中心行 systemFill 胶囊指示条
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF787880).copy(alpha = 0.12f))
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlassWheelColumn(
+                    items = hourLabels,
+                    selectedIndex = hour,
+                    onSelect = { hour = it },
+                    modifier = Modifier.weight(1f),
+                    visibleCount = 3
+                )
+                Text(
+                    text = ":",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                GlassWheelColumn(
+                    items = minuteLabels,
+                    selectedIndex = minute,
+                    onSelect = { minute = it },
+                    modifier = Modifier.weight(1f),
+                    visibleCount = 3
                 )
             }
         }

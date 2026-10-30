@@ -37,6 +37,8 @@ interface NativePluginInteraction {
     suspend fun notificationPermission(): Boolean
     suspend fun device(kind: String): JSONObject? = throw PluginException(PluginErrorCode.UNSUPPORTED, "当前页面不支持此设备能力")
     suspend fun visual(kind: String, input: JSONObject, images: List<File>): JSONObject? = throw PluginException(PluginErrorCode.UNSUPPORTED, "当前页面不支持此交互")
+    /** 宿主日期/时间滚轮选择器；kind 为 ui.date.pick / ui.time.pick / ui.datetime.pick / ui.time.range.pick。 */
+    suspend fun picker(kind: String, input: JSONObject): JSONObject? = throw PluginException(PluginErrorCode.UNSUPPORTED, "当前页面不支持宿主选择器")
     fun haptic()
     fun navigate(pageId: String, params: JSONObject)
     fun back()
@@ -127,6 +129,11 @@ class NativeCapabilityHost internal constructor(
                 "ui.viewport" -> viewport?.invoke() ?: throw PluginException(PluginErrorCode.UNSUPPORTED, "视口只在前台原生页面可用")
                 "ui.components" -> NativePluginContract.components()
                 "ui.navigation" -> JSONObject().put("maxDepth", 8)
+                "ui.date.pick", "ui.time.pick", "ui.datetime.pick", "ui.time.range.pick" -> {
+                    val target = interaction ?: throw PluginException(PluginErrorCode.UNSUPPORTED, "宿主选择器需要前台原生页面")
+                    PluginExecutionBudget.userInput { withContext(Dispatchers.Main) { target.picker(name, input) } }
+                        ?: throw PluginException(PluginErrorCode.CANCELLED, "已取消选择")
+                }
                 "academic.session.authorize" -> authorizeAcademic(flow)
                 "privacy.status" -> dataGuard.status()
                 "privacy.revoke" -> { dataGuard.revoke(); JSONObject.NULL }
@@ -445,6 +452,6 @@ class NativeCapabilityHost internal constructor(
     fun close() { operations.forEach(PluginOperation::close); operations.clear(); ioScope.cancel(); if (active()) PluginSessionCookies.save(app, pkg, session) }
     companion object {
         val PLATFORM = setOf("privacy.status", "privacy.revoke", "pages.register", "pages.open", "pages.close", "pages.unregister", "accounts.select", "accounts.remove", "services.discover", "services.call", "workflow.prepare", "workflow.step", "workflow.reconcile", "workflow.cancel", "workflow.list", "academic.study.snapshot", "academic.study.refresh", "academic.schedule.preview", "academic.schedule.confirm", "academic.session.authorize", "academic.session.request", "academic.session.revoke")
-        val IMPLEMENTED = setOf("userscript.interact", "userscript.action", "device.location.pick", "images.match", "images.puzzle", "browser.session.open", "browser.session.status", "browser.session.close", "userscript.configure", "records.upsert", "records.query", "ui.viewport", "ui.components", "ui.navigation", "network.request", "storage.get", "storage.set", "storage.remove", "auth.prompt", "credentials.find", "credentials.remove", "session.save", "session.restore", "session.clear", "files.pick", "files.create", "files.read", "files.write", "files.remove", "files.download", "files.upload", "files.open", "files.share", "device.clipboard.read", "device.clipboard.write", "device.haptic", "tasks.schedule", "tasks.cancel", "tasks.list", "notifications.post", "navigation.page", "navigation.back", "navigation.url", "runtime.cancel", "data.query", "widget.render", "widget.publish", "userscript.status", "userscript.update", "userscript.rollback", "userscript.start", "userscript.control", "tasks.foreground.start", "tasks.foreground.stop", "tasks.foreground.list", "device.scan", "device.location", "device.photo")
+        val IMPLEMENTED = setOf("userscript.interact", "userscript.action", "device.location.pick", "images.match", "images.puzzle", "browser.session.open", "browser.session.status", "browser.session.close", "userscript.configure", "records.upsert", "records.query", "ui.viewport", "ui.components", "ui.navigation", "ui.date.pick", "ui.time.pick", "ui.datetime.pick", "ui.time.range.pick", "network.request", "storage.get", "storage.set", "storage.remove", "auth.prompt", "credentials.find", "credentials.remove", "session.save", "session.restore", "session.clear", "files.pick", "files.create", "files.read", "files.write", "files.remove", "files.download", "files.upload", "files.open", "files.share", "device.clipboard.read", "device.clipboard.write", "device.haptic", "tasks.schedule", "tasks.cancel", "tasks.list", "notifications.post", "navigation.page", "navigation.back", "navigation.url", "runtime.cancel", "data.query", "widget.render", "widget.publish", "userscript.status", "userscript.update", "userscript.rollback", "userscript.start", "userscript.control", "tasks.foreground.start", "tasks.foreground.stop", "tasks.foreground.list", "device.scan", "device.location", "device.photo")
     }
 }
