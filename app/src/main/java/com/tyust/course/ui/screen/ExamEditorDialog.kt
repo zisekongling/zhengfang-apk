@@ -18,7 +18,10 @@ fun ExamEditorDialog(initial: ExamItemUi?, onDismiss: () -> Unit, onSave: (ExamI
     candidates: List<ExamItemUi> = emptyList(), onRelink: ((ExamItemUi) -> Unit)? = null) {
     var name by rememberSaveable { mutableStateOf(initial?.courseName.orEmpty()) }
     var date by rememberSaveable { mutableStateOf(examDate(initial?.examTime.orEmpty())) }
-    var time by rememberSaveable { mutableStateOf(Regex("\\d{2}:\\d{2}(?:\\s*[-~至]\\s*\\d{2}:\\d{2})?").find(initial?.examTime.orEmpty())?.value.orEmpty()) }
+    var time by rememberSaveable { mutableStateOf(initial?.examTime.orEmpty().let { value ->
+        val initialDate = examDate(value)
+        if (initialDate.isBlank()) value.trim() else value.substringAfter(initialDate).trim()
+    }) }
     var location by rememberSaveable { mutableStateOf(initial?.location.orEmpty()) }
     var seat by rememberSaveable { mutableStateOf(initial?.seatNumber.orEmpty()) }
     var type by rememberSaveable { mutableStateOf(initial?.examName.orEmpty()) }
@@ -27,7 +30,8 @@ fun ExamEditorDialog(initial: ExamItemUi?, onDismiss: () -> Unit, onSave: (ExamI
     var pickTime by remember { mutableStateOf(false) }
     var linked by remember { mutableStateOf<ExamItemUi?>(null) }
     val format = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply { isLenient = false } }
-    val validDate = date.length == 10 && runCatching { format.parse(date) != null }.getOrDefault(false)
+    val validDate = Regex("\\d{4}-\\d{2}-\\d{2}").matches(date) &&
+        runCatching { format.parse(date) != null }.getOrDefault(false)
     SystemDialog(onDismissRequest = onDismiss, scrollContent = true,
         title = { Text(if (initial == null) "添加考试" else "编辑考试") },
         confirmButton = { SystemDialogButton(onClick = {
@@ -39,7 +43,8 @@ fun ExamEditorDialog(initial: ExamItemUi?, onDismiss: () -> Unit, onSave: (ExamI
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SchoolFormField("课程名称", name, { name = it }, modifier = Modifier.testTag("exam-name"))
             SchoolFormField("考试日期", date, { date = it }, placeholder = "YYYY-MM-DD",
-                error = if (date.isNotBlank() && !validDate) "请输入有效日期" else null)
+                error = if (date.isNotBlank() && !validDate) "请输入有效日期" else null,
+                modifier = Modifier.testTag("exam-date-input"))
             SystemDialogButton(onClick = { pickDate = true }, modifier = Modifier.fillMaxWidth().testTag("exam-date")) {
                 Text(date.ifBlank { "选择考试日期" })
             }
@@ -60,7 +65,10 @@ fun ExamEditorDialog(initial: ExamItemUi?, onDismiss: () -> Unit, onSave: (ExamI
     if (pickDate) GlassDatePickerDialog(onConfirm = { date = format.format(Date(it)); pickDate = false },
         onDismiss = { pickDate = false }, initialMillis = runCatching { format.parse(date)?.time }.getOrNull() ?: System.currentTimeMillis(),
         title = "考试日期", preserveInitial = true)
-    if (pickTime) GlassTimeRangePickerDialog(onConfirm = { start, end -> time = "$start-$end"; pickTime = false },
-        onDismiss = { pickTime = false }, initialStart = time.substringBefore('-').ifBlank { "08:00" },
-        initialEnd = time.substringAfter('-', "10:00").ifBlank { "10:00" }, title = "考试时间", minuteStep = 1, preserveInitial = true)
+    if (pickTime) {
+        val clocks = Regex("\\d{2}:\\d{2}").findAll(time).take(2).map { it.value }.toList()
+        GlassTimeRangePickerDialog(onConfirm = { start, end -> time = "$start-$end"; pickTime = false },
+            onDismiss = { pickTime = false }, initialStart = clocks.getOrNull(0) ?: "08:00",
+            initialEnd = clocks.getOrNull(1) ?: "10:00", title = "考试时间", minuteStep = 1, preserveInitial = true)
+    }
 }
