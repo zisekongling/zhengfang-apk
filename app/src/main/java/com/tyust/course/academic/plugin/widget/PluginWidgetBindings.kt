@@ -3,6 +3,7 @@ package com.tyust.course.academic.plugin.widget
 import android.content.Context
 import android.content.SharedPreferences
 import com.tyust.course.academic.plugin.PluginWidgetContract
+import com.tyust.course.academic.plugin.PluginJson
 import org.json.JSONObject
 
 /**
@@ -52,9 +53,14 @@ object PluginWidgetBindings {
         )
     }
 
-    fun save(context: Context, binding: Binding) {
-        if (binding.appWidgetId <= 0) return
-        val json = JSONObject()
+    fun save(context: Context, binding: Binding) = synchronized(WidgetSnapshotStore) {
+        if (binding.appWidgetId <= 0) return@synchronized
+        prefs(context).edit().putString(binding.appWidgetId.toString(), json(binding).toString()).apply()
+    }
+
+    internal fun fingerprint(binding: Binding): String = PluginJson.canonical(json(binding))
+
+    private fun json(binding: Binding): JSONObject = JSONObject()
             .put("pluginId", binding.pluginId)
             .put("widgetId", binding.widgetId)
             .put("viewKey", binding.viewKey)
@@ -65,10 +71,7 @@ object PluginWidgetBindings {
             .put("size", binding.size)
             .put("boundAt", binding.boundAt)
             .put("offset", binding.offset)
-        prefs(context).edit().putString(binding.appWidgetId.toString(), json.toString()).apply()
-    }
-
-    fun delete(context: Context, appWidgetId: Int) {
+    fun delete(context: Context, appWidgetId: Int) = synchronized(WidgetSnapshotStore) {
         read(context, appWidgetId)?.let { WidgetSnapshotStore.clearInstance(context, it) }
         prefs(context).edit().remove(appWidgetId.toString()).apply()
     }

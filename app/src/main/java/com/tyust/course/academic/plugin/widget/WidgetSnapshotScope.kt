@@ -8,17 +8,31 @@ import com.tyust.course.manager.UserManager
 import org.json.JSONObject
 
 /** Internal ownership, independent of the launcher's optional account text. */
-internal data class WidgetSnapshotScope(val identity: String, val kind: String) {
+internal data class WidgetSnapshotScope(val identity: String, val kind: String, val serverId: String = "") {
     companion object {
-        fun current(app: Context, pluginId: String): WidgetSnapshotScope? {
+        fun current(app: Context, pluginId: String, owner: WidgetSnapshotScope? = null): WidgetSnapshotScope? {
             val pkg = runCatching { AcademicProviderRegistry.packages().active(pluginId) }.getOrNull() ?: return null
-            val server = pkg.manifest.json.optJSONArray("servers")?.takeIf { it.length() == 1 }?.optJSONObject(0)
+            val servers = pkg.manifest.json.optJSONArray("servers")?.let(PluginJson::objects).orEmpty()
+            val server = when (owner?.kind) {
+                "service" -> if (owner.serverId.isBlank()) servers.singleOrNull() else servers.singleOrNull { it.optString("id") == owner.serverId }
+                "plugin", "academic" -> null // An explicit plugin-wide owner never borrows a service account.
+                null -> servers.singleOrNull()
+                else -> return null
+            }
+            if (owner?.kind == "service" && server == null) return null
             val user = UserManager.getInstance()
             val session = if (server != null) AcademicSession(
                 AcademicSessionKey("service:$pluginId:${server.getString("id")}", PluginServiceAccounts(app).selected(pluginId, server.getString("id"))),
                 server.getString("origin"),
             ) else PluginLegacyData.session(app, pkg, user.currentSchool, user.currentAccountStorageKey)
-            return try { forSession(app, pkg, session) } finally { session.retire() }
+            return try { forSession(app, pkg, session).takeIf { owner == null || it.kind == owner.kind } } finally { session.retire() }
+        }
+
+        fun stored(root: JSONObject): WidgetSnapshotScope? {
+            val identity = root.optString("provenance")
+            val kind = root.optString("scopeKind")
+            if (!identity.matches(Regex("[0-9a-f]{64}")) || kind !in setOf("service", "academic", "plugin")) return null
+            return WidgetSnapshotScope(identity, kind, root.optString("scopeServerId"))
         }
 
         fun forSession(app: Context, pkg: PluginPackage, session: AcademicSession): WidgetSnapshotScope {
@@ -41,7 +55,8 @@ internal data class WidgetSnapshotScope(val identity: String, val kind: String) 
                         .put("configuration", user.currentSchool?.toJson() ?: JSONObject())
                 }
             }
-            return WidgetSnapshotScope(PluginJson.sha256(PluginJson.canonical(data).toByteArray()), kind)
+            val serverId = if (kind == "service") session.key.schoolId.removePrefix("service:${pkg.manifest.id}:") else ""
+            return WidgetSnapshotScope(PluginJson.sha256(PluginJson.canonical(data).toByteArray()), kind, serverId)
         }
     }
 }

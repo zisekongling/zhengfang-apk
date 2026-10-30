@@ -54,7 +54,7 @@ class NativeCapabilityHost internal constructor(
     private val foregroundGrant: NativeForegroundGrant? = null, private val active: () -> Boolean
 ) {
     private val dataGuard = PluginDataGuard(app, pkg)
-    private val widgetProvenance = WidgetSnapshotScope.forSession(app, pkg, session).identity
+    private val widgetProvenance = WidgetSnapshotScope.forSession(app, pkg, session)
     val namespace = PluginStorageScope.session(session, pkg.manifest.id, !pkg.official)
     private val legacyNamespaces = PluginLegacyData.namespaces(app, pkg, session)
     init { (legacyNamespaces + namespace).forEach { PluginServiceAccounts(app).trackScope(pkg.manifest.id, it) } }

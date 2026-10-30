@@ -33,10 +33,35 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import android.widget.RemoteViews
 
 @Implements(AppWidgetManager::class)
 class PinWidgetManager : ShadowAppWidgetManager() {
     var callback: PendingIntent? = null
+    @Volatile var delayedOptionsThread: Thread? = null
+    @Volatile var delayedApplyThread: Thread? = null
+    var renderReached = CountDownLatch(1)
+    var releaseRender = CountDownLatch(1)
+    var applyReached = CountDownLatch(1)
+    var releaseApply = CountDownLatch(1)
+    @Implementation override fun getAppWidgetOptions(appWidgetId: Int): Bundle {
+        val options = super.getAppWidgetOptions(appWidgetId)
+        if (Thread.currentThread() === delayedOptionsThread) {
+            renderReached.countDown()
+            check(releaseRender.await(10, TimeUnit.SECONDS)) { "Timed out releasing old render" }
+        }
+        return options
+    }
+    @Implementation override fun updateAppWidget(appWidgetId: Int, views: RemoteViews) {
+        if (Thread.currentThread() === delayedApplyThread) {
+            applyReached.countDown()
+            check(releaseApply.await(10, TimeUnit.SECONDS)) { "Timed out releasing old apply" }
+        }
+        super.updateAppWidget(appWidgetId, views)
+    }
     @Implementation override fun requestPinAppWidget(provider: ComponentName, extras: Bundle?, successCallback: PendingIntent?): Boolean {
         callback = successCallback
         return true
@@ -64,13 +89,13 @@ class PluginWidgetRuntimeTest {
         pkg = install()
     }
 
-    private fun install(server: Boolean = false, academic: Boolean = false): PluginPackage = runBlocking {
+    private fun install(server: Boolean = false, academic: Boolean = false, twoServers: Boolean = false): PluginPackage = runBlocking {
         // These are fresh fixture profiles. SDK AtomicFile.renameTo cannot replace its index
         // on Windows/Robolectric; package-update behavior is covered by the package-store tests.
-        if (server || academic) listOf("index.json", "index.json.new", "index.json.bak").forEach {
+        if (server || academic || twoServers) listOf("index.json", "index.json.new", "index.json.bak").forEach {
             File(app.filesDir, "academic-plugins/$it").delete()
         }
-        val pluginId = "test.widget-runtime" + when { academic -> "-academic"; server -> "-service"; else -> "" }
+        val pluginId = "test.widget-runtime" + when { twoServers -> "-two-servers"; academic -> "-academic"; server -> "-service"; else -> "" }
         val manifest = JSONObject("""{"id":"$pluginId","name":"Synthetic widget","version":"1.0.0","apiVersion":3,
           "kind":"widget","category":"productivity","entry":"index.js","minAppVersionCode":130,"permissions":["widget","runtime"],"capabilities":["data.query"],
           "requires":[{"name":"widget.render","version":1},{"name":"widget.publish","version":1},{"name":"data.query","version":1}],
@@ -79,6 +104,15 @@ class PluginWidgetRuntimeTest {
           {"id":"push","title":"Push","sizes":["2x2"],"template":"countdown","defaultView":"a","views":[{"key":"a","title":"A"},{"key":"b","title":"B"}],"refresh":{"mode":"push"}},
           {"id":"pull","title":"Pull","sizes":["2x2"],"template":"text","views":[{"key":"a","title":"A"}],"options":[{"id":"count","title":"Count","type":"number","default":2,"scope":"instance"}],"refresh":{"mode":"pull","providerId":"$pluginId.data"}}]}}""")
         if (server) manifest.put("servers", JSONArray().put(JSONObject().put("id", "site").put("title", "Site").put("origin", "https://site.test").put("authentication", "web")))
+        if (twoServers) {
+            manifest.put("kind", "native").put("servers", JSONArray(listOf("first", "second").map { id ->
+                JSONObject().put("id", id).put("title", id).put("origin", "https://$id.test").put("authentication", "web")
+            }))
+            manifest.getJSONArray("capabilities").put("ui.init").put("ui.reduce")
+            manifest.getJSONObject("contributes").put("pages", JSONArray(listOf("first", "second").map { id ->
+                JSONObject().put("id", id).put("title", id).put("serverId", id)
+            }))
+        }
         if (academic) manifest.remove("servers") // Historical native plugins retain their academic account scope.
         if (academic) { manifest.put("kind", "native"); manifest.remove("category") }
         val archive = ByteArrayOutputStream().also { output -> ZipOutputStream(output).use { zip ->
@@ -208,7 +242,7 @@ class PluginWidgetRuntimeTest {
         val accounts = PluginServiceAccounts(app)
         val account = accounts.select(pkg, "site", "A")
         val session = accounts.session(pkg, "site")
-        val provenance = WidgetSnapshotScope.forSession(app, pkg, session).identity
+        val provenance = WidgetSnapshotScope.forSession(app, pkg, session)
         val push = binding(template = "text")
         publish("a", "Private")
         accounts.remove(pkg, "site", account)
@@ -243,6 +277,137 @@ class PluginWidgetRuntimeTest {
         publish("a", "Plugin display")
         UserManager.getInstance().sessionState.replace("unrelated-account")
         assertEquals("Plugin display", WidgetSnapshotStore.read(app, push.pluginId, push.widgetId, push.viewKey)!!.payload.getJSONObject("header").getString("title"))
+    }
+
+    private fun delayedRefresh(instance: PluginWidgetBindings.Binding, delayApply: Boolean = false): Pair<Thread, PinWidgetManager> {
+        val shadow = org.robolectric.shadow.api.Shadow.extract<PinWidgetManager>(manager)
+        val failure = AtomicReference<Throwable?>()
+        val thread = Thread {
+            try {
+                android.os.Looper.prepare()
+                PluginWidgets.refreshId(app, instance.appWidgetId)
+            } catch (error: Throwable) { failure.set(error) }
+        }
+        thread.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> failure.set(error) }
+        if (delayApply) shadow.delayedApplyThread = thread else shadow.delayedOptionsThread = thread
+        thread.start()
+        assertTrue("Old render must reach the controlled delay", (if (delayApply) shadow.applyReached else shadow.renderReached).await(10, TimeUnit.SECONDS))
+        assertNull(failure.get())
+        return thread to shadow
+    }
+
+    private fun completeDelayedRefresh(thread: Thread, shadow: PinWidgetManager) {
+        shadow.releaseRender.countDown(); shadow.releaseApply.countDown()
+        thread.join(10_000)
+        assertFalse("Old render must terminate", thread.isAlive)
+    }
+
+    @Test fun delayedRenderCannotRepublishPrivateDataAfterServiceAccountSelection() {
+        pkg = install(server = true)
+        val instance = binding(template = "text")
+        val accounts = PluginServiceAccounts(app)
+        accounts.select(pkg, "site", "A"); publish("a", "Private A")
+        val (thread, shadow) = delayedRefresh(instance)
+        try {
+            accounts.select(pkg, "site", "B")
+            assertNull(WidgetSnapshotStore.read(app, instance.pluginId, instance.widgetId, instance.viewKey))
+        } finally { completeDelayedRefresh(thread, shadow) }
+        assertFalse(shadowOf(manager).getViewFor(instance.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.contains("Private A"))
+    }
+
+    @Test fun delayedRenderCannotRepublishPrivateDataAfterAcademicRetirement() {
+        pkg = install(academic = true)
+        val instance = binding(template = "text")
+        UserManager.getInstance().sessionState.replace("academic-a"); publish("a", "Private A")
+        val (thread, shadow) = delayedRefresh(instance)
+        try {
+            UserManager.getInstance().sessionState.replace("academic-b")
+            PluginWidgets.academicAccountChanged(app)
+        } finally { completeDelayedRefresh(thread, shadow) }
+        assertFalse(shadowOf(manager).getViewFor(instance.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.contains("Private A"))
+    }
+
+    @Test fun delayedRenderRechecksTheFullBindingBeforeApply() {
+        val instance = binding(template = "text")
+        publish("a", "View A"); publish("b", "View B")
+        val (thread, shadow) = delayedRefresh(instance)
+        try {
+            PluginWidgetBindings.save(app, instance.copy(viewKey = "b", offset = 1))
+            PluginWidgets.refreshId(app, instance.appWidgetId)
+        } finally { completeDelayedRefresh(thread, shadow) }
+        assertEquals("View B", shadowOf(manager).getViewFor(instance.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.toString())
+    }
+
+    @Test fun delayedRenderCannotRepublishAnUnavailablePackage() {
+        val instance = binding(template = "text")
+        publish("a", "Private package")
+        val (thread, shadow) = delayedRefresh(instance)
+        try { AcademicProviderRegistry.setEnabled(pkg.manifest.id, false) }
+        finally { completeDelayedRefresh(thread, shadow) }
+        assertFalse(shadowOf(manager).getViewFor(instance.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.contains("Private package"))
+    }
+
+    @Test fun delayedApplyCompletesBeforeTheAccountRetirementRepaint() {
+        pkg = install(server = true)
+        val instance = binding(template = "text")
+        val accounts = PluginServiceAccounts(app)
+        accounts.select(pkg, "site", "A"); publish("a", "Private A")
+        val (render, shadow) = delayedRefresh(instance, delayApply = true)
+        val retirementStarted = CountDownLatch(1)
+        val retirementDone = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        val retire = Thread {
+            try {
+                android.os.Looper.prepare(); retirementStarted.countDown()
+                accounts.select(pkg, "site", "B")
+            } catch (error: Throwable) { failure.set(error) }
+            finally { retirementDone.countDown() }
+        }
+        retire.start()
+        try {
+            assertTrue(retirementStarted.await(10, TimeUnit.SECONDS))
+            assertFalse("Retirement cannot finish ahead of an already committing old view", retirementDone.await(200, TimeUnit.MILLISECONDS))
+        } finally { completeDelayedRefresh(render, shadow); retire.join(10_000) }
+        assertFalse(retire.isAlive); assertNull(failure.get())
+        assertFalse(shadowOf(manager).getViewFor(instance.appWidgetId).findViewById<TextView>(R.id.plugin_widget_main).text.contains("Private A"))
+    }
+
+    @Test fun actualNativeHostPublishesAndReadsBothDeclaredServerScopes() = runBlocking {
+        pkg = install(twoServers = true)
+        val first = binding(view = "a", template = "text")
+        val second = binding(view = "b", template = "text")
+        val accounts = PluginServiceAccounts(app)
+        accounts.select(pkg, "first", "Account A"); accounts.select(pkg, "second", "Account B")
+        for ((server, view) in listOf("first" to "a", "second" to "b")) {
+            val session = accounts.session(pkg, server)
+            val host = NativeCapabilityHost(app, pkg, session, null) { accounts.current(pkg, session) }
+            try {
+                val input = JSONObject().put("widgetId", "push").put("viewKey", view).put("snapshot", payload(server))
+                val effect = JSONObject().put("id", "publish-$server").put("capability", "widget.publish").put("version", 1).put("input", input)
+                assertTrue((host.execute(effect, NativeFlow(false)) as JSONObject).getBoolean("published"))
+            } finally { session.retire(); host.close() }
+        }
+        assertEquals("first", WidgetSnapshotStore.read(app, first.pluginId, first.widgetId, first.viewKey)!!.payload.getJSONObject("header").getString("title"))
+        assertEquals("second", WidgetSnapshotStore.read(app, second.pluginId, second.widgetId, second.viewKey)!!.payload.getJSONObject("header").getString("title"))
+        accounts.select(pkg, "second", "New B")
+        assertNull(WidgetSnapshotStore.read(app, second.pluginId, second.widgetId, second.viewKey))
+    }
+
+    @Test fun multiServerNativeHostCanPublishExplicitPluginWideDisplayData() = runBlocking {
+        pkg = install(twoServers = true)
+        val instance = binding(template = "text")
+        val session = PluginLegacyData.session(app, pkg, null, UserManager.getInstance().currentAccountStorageKey)
+        val host = NativeCapabilityHost(app, pkg, session, null) { !session.retired }
+        try {
+            val input = JSONObject().put("widgetId", "push").put("viewKey", "a").put("snapshot", payload("Plugin wide"))
+            val effect = JSONObject().put("id", "publish-plugin").put("capability", "widget.publish").put("version", 1).put("input", input)
+            assertTrue((host.execute(effect, NativeFlow(false)) as JSONObject).getBoolean("published"))
+            UserManager.getInstance().sessionState.replace("unrelated-academic")
+            val saved = WidgetSnapshotStore.read(app, instance.pluginId, instance.widgetId, instance.viewKey)!!
+            assertEquals("plugin", saved.root.getString("scopeKind"))
+            assertEquals("", saved.root.getString("scopeServerId"))
+            assertEquals("Plugin wide", saved.payload.getJSONObject("header").getString("title"))
+        } finally { session.retire(); host.close() }
     }
 
     @Test fun refreshBroadcastEnqueuesPullForOnlyTheBoundDeclaration() {

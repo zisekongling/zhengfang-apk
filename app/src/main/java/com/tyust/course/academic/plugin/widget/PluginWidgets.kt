@@ -13,6 +13,7 @@ import com.tyust.course.academic.plugin.PluginManifest
 import com.tyust.course.academic.plugin.PluginPackage
 import com.tyust.course.academic.plugin.PluginPages
 import com.tyust.course.academic.plugin.PluginWidgetContract
+import com.tyust.course.academic.plugin.PluginJson
 import com.tyust.course.academic.plugin.widgetInvalid
 import com.tyust.course.ui.system.GlassToaster
 import org.json.JSONArray
@@ -42,7 +43,7 @@ object PluginWidgets {
         .put("sizes", JSONArray(PluginWidgetContract.SIZES.sorted()))
 
     /** `widget.publish@1`: validate, persist and refresh every bound instance of the plugin. */
-    fun publish(context: Context, manifest: PluginManifest, input: JSONObject, provenance: String = ""): JSONObject {
+    internal fun publish(context: Context, manifest: PluginManifest, input: JSONObject, provenance: WidgetSnapshotScope? = null): JSONObject {
         val widgetId = input.optString("widgetId")
         if (!PluginWidgetContract.declaresWidgets(manifest)) {
             widgetInvalid("插件未声明小组件")
@@ -73,9 +74,12 @@ object PluginWidgets {
 
     /** Account changes retire persisted data and the already rendered launcher view. */
     fun academicAccountChanged(context: Context) {
-        WidgetSnapshotStore.clearAcademic(context)
-        // Login restoration can precede registry initialization at process startup.
-        runCatching { refreshAll(context); PluginWidgetPull.requestAll(context) }
+        synchronized(WidgetSnapshotStore) {
+            WidgetSnapshotStore.clearAcademic(context)
+            // Login restoration can precede registry initialization at process startup.
+            runCatching { refreshAll(context) }
+        }
+        runCatching { PluginWidgetPull.requestAll(context) }
     }
 
     fun refreshPlugin(context: Context, pluginId: String) {
@@ -113,14 +117,16 @@ object PluginWidgets {
 
     /** Disabled plugins retain configuration so enabling them restores the same launcher instances. */
     fun availabilityChanged(context: Context, pluginId: String) {
-        PluginWidgetPullService.cancel(context, pluginId)
-        refreshPlugin(context, pluginId)
-        rescheduleCountdown(context)
+        synchronized(WidgetSnapshotStore) {
+            PluginWidgetPullService.cancel(context, pluginId)
+            refreshPlugin(context, pluginId)
+            rescheduleCountdown(context)
+        }
         PluginWidgetPull.requestForBindings(context, PluginWidgetBindings.forPlugin(context, pluginId).map { it.appWidgetId }.toIntArray())
     }
 
     /** Removes snapshots and bindings when the plugin is uninstalled. */
-    fun clearPlugin(context: Context, pluginId: String) {
+    fun clearPlugin(context: Context, pluginId: String) = synchronized(WidgetSnapshotStore) {
         val manager = AppWidgetManager.getInstance(context)
         PluginWidgetBindings.forPlugin(context, pluginId).forEach { binding ->
             runCatching {
@@ -201,6 +207,8 @@ object PluginWidgets {
         val staleAfter = declaration?.staleAfterSeconds ?: PluginWidgetContract.DEFAULT_STALE_SECONDS
         val snapshot = if (declaration == null) null else
             WidgetSnapshotStore.read(context, binding, declaration)
+        val bindingFingerprint = PluginWidgetBindings.fingerprint(binding)
+        val snapshotFingerprint = snapshot?.let { PluginJson.canonical(it.root) }
         val views = PluginWidgetRenderer.responsive(
             context,
             if (declaration == null) null else pkg,
@@ -209,7 +217,18 @@ object PluginWidgets {
             staleAfter,
             manager.getAppWidgetOptions(appWidgetId) ?: Bundle(),
         )
-        manager.updateAppWidget(appWidgetId, views)
+        // Building RemoteViews may run on IO and block. Only the final apply shares the
+        // snapshot-retirement/binding-mutation lock; never revive a captured old owner.
+        synchronized(WidgetSnapshotStore) {
+            val currentBinding = PluginWidgetBindings.read(context, appWidgetId) ?: return
+            if (PluginWidgetBindings.fingerprint(currentBinding) != bindingFingerprint) return
+            val currentPackage = installed(context, binding.pluginId)
+            if (currentPackage?.digest != pkg?.digest) return
+            val currentDeclaration = currentPackage?.let { PluginWidgetContract.declaration(it.manifest, binding.widgetId) }
+            val currentSnapshot = currentDeclaration?.let { WidgetSnapshotStore.read(context, currentBinding, it) }
+            if (currentSnapshot?.let { PluginJson.canonical(it.root) } != snapshotFingerprint) return
+            manager.updateAppWidget(appWidgetId, views)
+        }
     }
 
     private fun installed(context: Context, pluginId: String): PluginPackage? =

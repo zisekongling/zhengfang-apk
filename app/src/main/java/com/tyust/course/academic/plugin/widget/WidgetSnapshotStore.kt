@@ -24,8 +24,8 @@ object WidgetSnapshotStore {
     }
 
     @Synchronized
-    fun save(context: Context, pluginId: String, widgetId: String, viewKey: String,
-             payload: JSONObject, now: Long = System.currentTimeMillis(), provenance: String = ""): Snapshot {
+    internal fun save(context: Context, pluginId: String, widgetId: String, viewKey: String,
+             payload: JSONObject, now: Long = System.currentTimeMillis(), provenance: WidgetSnapshotScope? = null): Snapshot {
         val scope = requireScope(context, pluginId, provenance)
         val legacy = legacyFile(context, pluginId, widgetId).takeIf {
             load(it, pluginId, widgetId, viewKey)?.root?.optInt("schema") == 1
@@ -37,8 +37,8 @@ object WidgetSnapshotStore {
     }
 
     @Synchronized
-    fun savePull(context: Context, binding: PluginWidgetBindings.Binding, declaration: PluginWidgetContract.Declaration,
-                 payload: JSONObject, now: Long = System.currentTimeMillis(), provenance: String = ""): Snapshot {
+    internal fun savePull(context: Context, binding: PluginWidgetBindings.Binding, declaration: PluginWidgetContract.Declaration,
+                 payload: JSONObject, now: Long = System.currentTimeMillis(), provenance: WidgetSnapshotScope? = null): Snapshot {
         require(!declaration.push && declaration.id == binding.widgetId)
         val scope = requireScope(context, binding.pluginId, provenance)
         return persist(context, binding.pluginId, binding.widgetId, declaration.viewKey(binding.viewKey), payload, now,
@@ -49,14 +49,14 @@ object WidgetSnapshotStore {
     /** Only push snapshots can safely migrate from the old declaration-wide cache. */
     @Synchronized
     fun read(context: Context, pluginId: String, widgetId: String, viewKey: String = ""): Snapshot? {
-        val scope = WidgetSnapshotScope.current(context, pluginId) ?: return null
         val target = pushFile(context, pluginId, widgetId, viewKey)
         if (runCatching { recover(target) }.isFailure) return null
         if (target.exists()) {
             val snapshot = load(target, pluginId, widgetId, viewKey)
-            if (snapshot?.root?.optString("mode") == "push" && snapshot.root.optString("provenance") == scope.identity) return snapshot
+            if (snapshot?.root?.optString("mode") == "push" && ownsCurrentScope(context, snapshot)) return snapshot
             delete(target)
         }
+        val scope = WidgetSnapshotScope.current(context, pluginId) ?: return null
         val legacy = legacyFile(context, pluginId, widgetId)
         // Account-sensitive legacy caches never recorded ownership and cannot be assigned now.
         if (scope.kind != "plugin") { delete(legacy); return null }
@@ -76,23 +76,27 @@ object WidgetSnapshotStore {
         // Legacy pull snapshots lack instance and options provenance: refetch instead of guessing.
         delete(legacyFile(context, binding.pluginId, binding.widgetId))
         val file = pullFile(context, binding)
-        val scope = WidgetSnapshotScope.current(context, binding.pluginId) ?: return null
         val snapshot = load(file, binding.pluginId, binding.widgetId, viewKey)?.takeIf {
             it.root.optString("mode") == "pull" && it.root.optInt("appWidgetId") == binding.appWidgetId &&
-                it.root.optString("configuration") == configuration(binding, declaration) && it.root.optString("provenance") == scope.identity
+                it.root.optString("configuration") == configuration(binding, declaration) && ownsCurrentScope(context, it)
         }
         if (snapshot == null) delete(file)
         return snapshot
     }
 
-    private fun requireScope(context: Context, pluginId: String, expected: String): WidgetSnapshotScope {
-        val scope = WidgetSnapshotScope.current(context, pluginId) ?: widgetInvalid("插件快照上下文已改变")
-        if (expected.isNotBlank() && expected != scope.identity) widgetInvalid("账号或插件快照上下文已改变")
+    private fun ownsCurrentScope(context: Context, snapshot: Snapshot): Boolean {
+        val owner = WidgetSnapshotScope.stored(snapshot.root) ?: return false
+        return WidgetSnapshotScope.current(context, snapshot.pluginId, owner)?.identity == owner.identity
+    }
+
+    private fun requireScope(context: Context, pluginId: String, expected: WidgetSnapshotScope?): WidgetSnapshotScope {
+        val scope = WidgetSnapshotScope.current(context, pluginId, expected) ?: widgetInvalid("插件快照上下文已改变")
+        if (expected != null && expected.identity != scope.identity) widgetInvalid("账号或插件快照上下文已改变")
         return scope
     }
 
     private fun identity(mode: String, scope: WidgetSnapshotScope) = JSONObject().put("mode", mode)
-        .put("provenance", scope.identity).put("scopeKind", scope.kind)
+        .put("provenance", scope.identity).put("scopeKind", scope.kind).put("scopeServerId", scope.serverId)
 
     @Synchronized fun clearAcademic(context: Context) {
         File(context.filesDir, ROOT).listFiles().orEmpty().filter(File::isDirectory).forEach { directory ->

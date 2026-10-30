@@ -99,7 +99,7 @@ internal object PluginWidgetPull {
         PluginWidgetPullService.schedule(app, pluginId)
         val accounts = PluginServiceAccounts(app)
         val session = session(app, pkg, accounts)
-        val provenance = WidgetSnapshotScope.forSession(app, pkg, session).identity
+        val provenance = WidgetSnapshotScope.forSession(app, pkg, session)
         val user = UserManager.getInstance()
         val token = user.sessionState.token
         val job = currentCoroutineContext()[kotlinx.coroutines.Job]
@@ -132,7 +132,7 @@ internal object PluginWidgetPull {
         pkg: PluginPackage,
         session: AcademicSession,
         binding: PluginWidgetBindings.Binding,
-        provenance: String,
+        provenance: WidgetSnapshotScope,
         active: () -> Boolean,
     ) {
         val declaration = PluginWidgetContract.declaration(pkg.manifest, binding.widgetId) ?: return
@@ -188,7 +188,7 @@ internal object PluginWidgetPull {
     /** An awaited query must not revive a deleted, reconfigured or disabled widget. */
     internal fun storeResult(app: Context, binding: PluginWidgetBindings.Binding,
                              declaration: PluginWidgetContract.Declaration, snapshot: JSONObject,
-                             now: Long, provenance: String = "", active: () -> Boolean) {
+                             now: Long, provenance: WidgetSnapshotScope? = null, active: () -> Boolean) {
         if (!active()) return
         val current = PluginWidgetBindings.read(app, binding.appWidgetId) ?: return
         if (WidgetSnapshotStore.configuration(current, declaration) != WidgetSnapshotStore.configuration(binding, declaration)) return
